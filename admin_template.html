@@ -546,6 +546,14 @@ input:focus, select:focus, textarea:focus { outline:none; border-color:#38bdf8; 
               <button id="btn-repair" onclick="runRepair()" class="btn-warn flex-1 !py-2 text-sm">🔧 一键修复</button>
             </div>
           </div>
+
+          <!-- 一键重启Bot -->
+          <div class="card rounded-xl p-5">
+            <div class="text-sm font-semibold mb-2">🔄 一键重启 Bot</div>
+            <div class="text-xs text-slate-400 mb-4">执行 systemctl restart 重启 bot 和 admin 服务，无需SSH手动敲命令</div>
+            <button id="btn-restart-bot" onclick="restartBot()" class="btn-rose w-full !py-2 text-sm">🔄 重启 Bot 服务</button>
+            <div id="restart-bot-result" class="text-xs mt-3 space-y-1"></div>
+          </div>
         </div>
 
         <!-- 版本管理：上传/备份/回滚 -->
@@ -3281,6 +3289,26 @@ async function runClearCache(){
   document.getElementById('cache-result').innerHTML = `
     <div class="text-emerald-300 mb-2">✅ 共释放 ${r.total_freed_mb||0} MB</div>
     ${(r.items||[]).map(x => `<div class="text-xs mb-1"><b>${x.name}：</b>${x.detail}</div>`).join('')}`;
+}
+async function restartBot(){
+  if(!confirm('确定要重启 Bot 服务？Bot 和 Admin 服务将在 ~5 秒内重新上线，期间机器人会短暂掉线。')) return;
+  const btn = document.getElementById('btn-restart-bot');
+  if(btn){ btn.disabled = true; btn.style.opacity = '0.5'; btn.style.pointerEvents = 'none'; btn.textContent = '⏳ 重启中...'; }
+  const out = document.getElementById('restart-bot-result');
+  if(out) out.innerHTML = '<div class="text-amber-300">🔄 正在执行重启...</div>';
+  const r = await adminFetch('/api/admin/ops/restart_bot', {}, 'POST');
+  if(btn){ btn.disabled = false; btn.style.opacity = ''; btn.style.pointerEvents = ''; btn.textContent = '🔄 重启 Bot 服务'; }
+  if(!r || !r.ok){
+    toast('❌ 重启失败：' + (r?.error||'未知错误'), 'error');
+    if(out) out.innerHTML = `<div class="text-rose-300">❌ ${r?.error||'请求失败'}</div>`;
+    return;
+  }
+  const lines = (r.results||[]).map(x => x.ok
+    ? `<div class="text-emerald-300">✅ ${x.service}：${x.detail}</div>`
+    : `<div class="text-rose-300">❌ ${x.service}：${x.detail}</div>`);
+  const hint = r.hint ? `<div class="text-slate-400 mt-2">${r.hint}</div>` : '';
+  if(out) out.innerHTML = lines.join('') + hint;
+  toast('✅ 重启指令已发送', 'success');
 }
 async function loadVersions(){
   const r = await adminFetch('/api/admin/ops/versions');

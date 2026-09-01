@@ -3661,6 +3661,50 @@ async def api_admin_backup_restore_upload(request: Request):
 
 
 # =========================================================================
+# 重启Bot API
+# =========================================================================
+
+@app.post("/api/admin/ops/restart_bot")
+async def api_admin_ops_restart_bot(request: Request):
+    """一键重启Bot进程（systemctl restart tg-search-bot）"""
+    try:
+        p = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "格式错误"}, status_code=400)
+    if not _verify_admin_session(str(p.get("session_id", ""))):
+        return JSONResponse({"ok": False, "error": "未登录"}, status_code=401)
+    import subprocess as _sp
+    results = []
+    tried = False
+    for svc in ("tg-search-bot", "tg-search-admin"):
+        try:
+            r = _sp.run(["sudo", "systemctl", "restart", svc],
+                        capture_output=True, text=True, timeout=10)
+            tried = True
+            if r.returncode == 0:
+                results.append({"service": svc, "ok": True, "detail": f"✅ systemctl restart {svc} 成功"})
+            else:
+                results.append({"service": svc, "ok": False, "detail": f"❌ {svc}: {r.stderr.strip()[:100]}"})
+        except FileNotFoundError:
+            results.append({"service": svc, "ok": False, "detail": "❌ sudo 或 systemctl 命令不存在"})
+        except Exception as e:
+            results.append({"service": svc, "ok": False, "detail": f"❌ 重启失败：{str(e)[:80]}"})
+    if not tried:
+        return JSONResponse({
+            "ok": False,
+            "error": "无法执行 systemctl（请检查 sudo 权限或服务名）",
+            "hint": "请手动执行：sudo systemctl restart tg-search-bot && sudo systemctl restart tg-search-admin",
+        })
+    success = any(r["ok"] for r in results)
+    return JSONResponse({
+        "ok": success,
+        "results": results,
+        "hint": "Bot 将在 ~5 秒内重新上线；若未恢复请检查 logs/bot_*.log"
+        if success else "请检查日志或手动执行重启命令",
+    })
+
+
+# =========================================================================
 # 机器人前端 API（与 demo_server.py 保持一致）
 # =========================================================================
 async def search_messages(keyword: str, limit=5):

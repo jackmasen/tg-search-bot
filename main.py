@@ -1,9 +1,10 @@
 """
 TG搜索机器人 - 主启动入口
-启动流程：初始化DB → 初始化账号池 → 启动Bot → 启动监听
+启动流程：初始化DB → 加载DB配置覆盖.env → 初始化账号池 → 启动Bot → 启动监听
 """
 import asyncio
 import sys
+import os
 from loguru import logger
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
@@ -26,6 +27,20 @@ from app.bot.handlers import (
     ad_templates_command,
     ad_stats_command,
 )
+
+
+async def _load_config_from_db():
+    """从数据库加载配置并覆盖内存 Config（DB > .env）"""
+    try:
+        from app.database import get_db
+        from app.admin.system_settings_manager import load_all_settings_from_db
+        async with get_db() as db:
+            db_vals = await load_all_settings_from_db(db)
+            if db_vals:
+                Config.apply_overrides(db_vals)
+                logger.info(f"已从数据库加载配置，生效项: {list(db_vals.keys())}")
+    except Exception as e:
+        logger.warning(f"数据库配置加载失败（使用 .env 配置）: {e}")
 
 
 # 日志配置
@@ -62,9 +77,17 @@ async def post_init(app: Application):
 
 def main():
     """主入口"""
-    import os
     os.makedirs(Config.LOG_DIR, exist_ok=True)
     setup_logging()
+
+    # 使用单一事件循环完成所有初始化（DB建表 + 加载DB配置）
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        loop.run_until_complete(init_db())
+        loop.run_until_complete(_load_config_from_db())
+    finally:
+        loop.close()
 
     # 校验配置
     try:
@@ -75,6 +98,7 @@ def main():
         sys.exit(1)
 
     logger.info(f"启动 TG搜索机器人 v{Config.APP_VERSION}")
+    logger.info(f"Bot Token: {'已配置 ✓' if Config.BOT_TOKEN else '未配置 ✗'}")
 
     # 创建Bot应用
     application = Application.builder().token(Config.BOT_TOKEN).post_init(post_init).build()
