@@ -32,7 +32,7 @@ class VersionManager:
         """
         if not Config.VERSION_REPO_URL:
             return {"has_update": False, "reason": "未配置Git仓库地址"}
-
+        self._ensure_git_safe()
         try:
             # git fetch（不合并）
             subprocess.run(
@@ -96,6 +96,7 @@ class VersionManager:
             await db.commit()
 
         # 3. 执行git pull
+        self._ensure_git_safe()
         try:
             result = subprocess.run(
                 ["git", "pull", "origin", "main"],
