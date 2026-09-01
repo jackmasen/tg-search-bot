@@ -3711,7 +3711,7 @@ async def api_admin_ops_restart_bot(request: Request):
 @app.get("/api/admin/ops/git_check_update")
 async def api_admin_ops_git_check_update(request: Request):
     """检查是否有新版本（git fetch + 比较 commit）"""
-    if not _verify_admin_session(str(request.headers.get("x-session-id", ""))):
+    if not _verify_admin_session(str(request.query_params.get("session_id", ""))):
         return JSONResponse({"ok": False, "error": "未登录"}, status_code=401)
     try:
         from app.admin.version_manager import version_manager
