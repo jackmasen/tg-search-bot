@@ -3435,7 +3435,9 @@ async function checkGitUpdate(){
       <div class="text-slate-500 mt-1">最新: ${r.latest_commit?.slice(0,7)||''} · ${r.latest_date||''}</div>
       <div class="text-sky-300 mt-1">提示：点击「🚀 一键更新」将自动备份 DB 并拉取代码</div>`;
   } else {
-    if(out) out.innerHTML = `<span class="text-emerald-300">✅ 已是最新版本，无需更新</span>`;
+    const reason = r.reason ? `<div class="text-amber-400 mt-1">⚠️ ${r.reason}</div>` : '';
+    if(out) out.innerHTML = `<span class="text-emerald-300">✅ 已是最新版本，无需更新</span>${reason}`;
+    if(status) status.textContent = r.reason ? `检查失败` : `当前: v${r.current_version||'?'} · 最新`;
   }
 }
 async function performGitUpdate(){
