@@ -1,0 +1,3693 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>运营后台 · TG搜索机器人</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background:#0f172a; }
+.card { background: linear-gradient(145deg,#1e293b,#172033); border:1px solid #334155; }
+.stat-num { background: linear-gradient(135deg,#38bdf8,#818cf8); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
+.side-item { transition:all .15s; }
+.side-item:hover { background:#1e293b; }
+.side-item.active { background: linear-gradient(90deg, rgba(56,189,248,.15), transparent); border-left: 3px solid #38bdf8; color:#e2e8f0; }
+.tab-panel { display:none; }
+.tab-panel.active { display:block; animation: fade .2s ease; }
+@keyframes fade { from { opacity:0; transform: translateY(4px); } to { opacity:1; transform:none; } }
+table th { position:sticky; top:0; background:#1e293b; z-index:1; }
+.badge { font-size:10px; padding: 2px 8px; border-radius: 9999px; }
+input, select, textarea { background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-radius: 6px; padding: 6px 10px; }
+input:focus, select:focus, textarea:focus { outline:none; border-color:#38bdf8; box-shadow: 0 0 0 2px rgba(56,189,248,.2); }
+.btn-primary { background: linear-gradient(135deg,#0ea5e9,#6366f1); }
+.btn-primary:hover { filter: brightness(1.1); }
+</style>
+</head>
+<body class="text-slate-200">
+
+<!-- ========== 登录页（未登录时显示） ========== -->
+<div id="loginWrap" class="min-h-screen flex items-center justify-center p-4">
+  <div class="card w-full max-w-md rounded-2xl p-8 shadow-2xl">
+    <div class="text-center mb-6">
+      <div class="w-16 h-16 mx-auto rounded-2xl bg-gradient-to-br from-sky-500 to-indigo-600 flex items-center justify-center text-3xl mb-3">⚙️</div>
+      <h1 class="text-xl font-bold text-white">TG搜索机器人 · 运营后台</h1>
+      <p class="text-sm text-slate-400 mt-1">Demo Admin · 本地演示版</p>
+    </div>
+    <form onsubmit="doLogin(event)" class="space-y-4">
+      <div>
+        <label class="text-xs text-slate-400 mb-1 block">管理员账号</label>
+        <input id="loginUser" type="text" value="admin" class="w-full" autocomplete="username" required>
+      </div>
+      <div>
+        <label class="text-xs text-slate-400 mb-1 block">管理员密码</label>
+        <input id="loginPass" type="password" value="demo123456" class="w-full" autocomplete="current-password" required>
+      </div>
+      <div id="loginErr" class="hidden text-xs text-rose-400"></div>
+      <button type="submit" class="btn-primary w-full py-2.5 rounded-lg text-white font-semibold">🔐 登录后台</button>
+      <div class="text-[11px] text-slate-500 text-center leading-relaxed pt-2 border-t border-slate-700">
+        默认账号：<code class="text-sky-400">admin</code> / 密码：<code class="text-sky-400">demo123456</code><br>
+        生产环境请改为.env强密码 + 加盐哈希存储
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ========== 修改密码弹窗 ========== -->
+<div id="changePwdModal" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+  <div class="card w-full max-w-md rounded-2xl p-6 shadow-2xl">
+    <div class="flex items-center justify-between mb-5">
+      <h2 class="text-lg font-bold text-white">🔒 修改管理员密码</h2>
+      <button onclick="closeChangePwdModal()" class="text-slate-400 hover:text-white text-xl">✕</button>
+    </div>
+    <div class="space-y-4">
+      <div>
+        <label class="text-xs text-slate-400 mb-1 block">管理员账号</label>
+        <input id="cp-username" type="text" class="w-full" placeholder="admin">
+      </div>
+      <div>
+        <label class="text-xs text-slate-400 mb-1 block">旧密码</label>
+        <input id="cp-old-pwd" type="password" class="w-full" placeholder="当前密码">
+      </div>
+      <div>
+        <label class="text-xs text-slate-400 mb-1 block">新密码（至少6位）</label>
+        <input id="cp-new-pwd" type="password" class="w-full" placeholder="新密码">
+      </div>
+      <div>
+        <label class="text-xs text-slate-400 mb-1 block">确认新密码</label>
+        <input id="cp-confirm-pwd" type="password" class="w-full" placeholder="再次输入新密码">
+      </div>
+      <div id="cp-result" class="hidden text-xs"></div>
+      <div class="flex gap-3 pt-2">
+        <button onclick="submitChangePwd()" class="btn-primary flex-1 !py-2">✅ 确认修改</button>
+        <button onclick="closeChangePwdModal()" class="flex-1 py-2 rounded-lg bg-slate-700 hover:bg-slate-600">取消</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ========== 后台主界面（登录后显示） ========== -->
+<div id="adminWrap" class="hidden">
+  <!-- 顶栏 -->
+  <header class="bg-slate-900 border-b border-slate-700 px-6 py-3 sticky top-0 z-20">
+    <div class="max-w-[1600px] mx-auto flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-sky-500 to-indigo-500 flex items-center justify-center text-lg">⚙️</div>
+        <div>
+          <div class="font-bold">TG搜索机器人 · 运营后台</div>
+          <div class="text-xs text-slate-400" id="topSubtitle">本地演示模式</div>
+        </div>
+      </div>
+      <div class="flex items-center gap-3">
+        <span class="text-xs text-slate-400">当前管理员：<span class="text-sky-300 font-semibold" id="curAdmin">-</span></span>
+        <button onclick="openBotInterface()" class="text-xs bg-slate-700 hover:bg-slate-600 px-3 py-1.5 rounded-lg">📱 Bot界面</button>
+        <button onclick="refreshDashboard()" class="text-xs bg-sky-600 hover:bg-sky-500 px-3 py-1.5 rounded-lg">🔄 刷新数据</button>
+        <button onclick="openChangePwdModal()" class="text-xs bg-emerald-700/70 hover:bg-emerald-600 px-3 py-1.5 rounded-lg">🔒 修改密码</button>
+        <button onclick="doLogout()" class="text-xs bg-rose-700/70 hover:bg-rose-600 px-3 py-1.5 rounded-lg">🚪 退出登录</button>
+      </div>
+    </div>
+  </header>
+
+  <div class="max-w-[1600px] mx-auto flex">
+    <!-- 侧边栏菜单 -->
+    <aside class="w-56 min-h-[calc(100vh-60px)] border-r border-slate-800 py-4 px-2 shrink-0 bg-slate-900/40">
+      <div class="text-[11px] text-slate-500 uppercase tracking-wider px-3 mb-2">主导航</div>
+      <nav id="sideNav" class="space-y-1 text-sm">
+        <a class="side-item active flex items-center gap-2 px-3 py-2.5 rounded-lg cursor-pointer" data-tab="overview">
+          <span>📊</span><span>运营总览</span>
+        </a>
+        <a class="side-item flex items-center gap-2 px-3 py-2.5 rounded-lg cursor-pointer text-slate-400" data-tab="users">
+          <span>🧑</span><span>用户管理</span>
+        </a>
+        <a class="side-item flex items-center gap-2 px-3 py-2.5 rounded-lg cursor-pointer text-slate-400" data-tab="channels">
+          <span>📺</span><span>频道管理 / 推广</span>
+          <span class="ml-auto text-[9px] bg-amber-700/50 text-amber-200 px-1.5 rounded">自营推荐</span>
+        </a>
+        <a class="side-item flex items-center gap-2 px-3 py-2.5 rounded-lg cursor-pointer text-slate-400" data-tab="ads">
+          <span>📣</span><span>广告管理</span>
+        </a>
+        <a class="side-item flex items-center gap-2 px-3 py-2.5 rounded-lg cursor-pointer text-slate-400" data-tab="hotwords">
+          <span>🔥</span><span>热门关键词</span>
+          <span class="ml-auto text-[9px] bg-orange-700/50 text-orange-200 px-1.5 rounded">新</span>
+        </a>
+        <a class="side-item flex items-center gap-2 px-3 py-2.5 rounded-lg cursor-pointer text-slate-400" data-tab="recharge">
+          <span>💵</span><span>充值订单</span>
+        </a>
+        <a class="side-item flex items-center gap-2 px-3 py-2.5 rounded-lg cursor-pointer text-slate-400" data-tab="tx">
+          <span>📒</span><span>交易流水</span>
+        </a>
+        <a class="side-item flex items-center gap-2 px-3 py-2.5 rounded-lg cursor-pointer text-slate-400" data-tab="system">
+          <span>🖥</span><span>系统监控</span>
+        </a>
+        <a class="side-item flex items-center gap-2 px-3 py-2.5 rounded-lg cursor-pointer text-slate-400" data-tab="crawler">
+          <span>🐢</span><span>小号 / 代理管理</span>
+          <span class="ml-auto text-[9px] bg-sky-700/50 text-sky-200 px-1.5 rounded">新</span>
+        </a>
+        <a class="side-item flex items-center gap-2 px-3 py-2.5 rounded-lg cursor-pointer text-slate-400" data-tab="botmenu">
+          <span>🤖</span><span>机器人菜单设置</span>
+          <span class="ml-auto text-[9px] bg-emerald-700/50 text-emerald-200 px-1.5 rounded">新</span>
+        </a>
+        <a class="side-item flex items-center gap-2 px-3 py-2.5 rounded-lg cursor-pointer text-slate-400" data-tab="settings">
+          <span>⚙️</span><span>系统配置</span>
+          <span class="ml-auto text-[9px] bg-indigo-700/50 text-indigo-200 px-1.5 rounded">热</span>
+        </a>
+        <a class="side-item flex items-center gap-2 px-3 py-2.5 rounded-lg cursor-pointer text-slate-400" data-tab="ops">
+          <span>🛠</span><span>系统升级 / 维护</span>
+          <span class="ml-auto text-[9px] bg-rose-700/50 text-rose-200 px-1.5 rounded">新</span>
+        </a>
+      </nav>
+      <div class="mt-6 px-3 pt-4 border-t border-slate-800 text-[11px] text-slate-500 leading-relaxed">
+        💡 小贴士<br>
+        • "频道管理"里可手动添加你自己的项目/频道/群<br>
+        • 开启"推荐置顶"会在用户搜索结果侧边栏展示<br>
+        • sort_order 数字越小越靠前（1=最顶）<br>
+        • "小号管理"里配置独立代理IP防关联检测<br>
+        • "机器人菜单"改完实时生效用户立即看到新版布局
+      </div>
+    </aside>
+
+    <!-- 主内容区 -->
+    <main class="flex-1 p-6 min-w-0">
+
+      <!-- Tab0: 运营总览 -->
+      <section id="tab-overview" class="tab-panel active">
+        <h2 class="text-lg font-bold mb-4">📊 运营总览仪表盘</h2>
+        <!-- 指标卡片 -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+          <div class="card rounded-xl p-5">
+            <div class="text-xs text-slate-400 mb-2">📱 总用户数</div>
+            <div id="st-users" class="stat-num text-3xl font-extrabold">0</div>
+            <div id="st-users-today" class="text-xs text-emerald-400 mt-1">+0 今日新增</div>
+          </div>
+          <div class="card rounded-xl p-5">
+            <div class="text-xs text-slate-400 mb-2">💰 总充值金额 (USDT)</div>
+            <div id="st-recharge" class="stat-num text-3xl font-extrabold">0.00</div>
+            <div id="st-recharge-count" class="text-xs text-emerald-400 mt-1">共 0 笔充值</div>
+          </div>
+          <div class="card rounded-xl p-5">
+            <div class="text-xs text-slate-400 mb-2">📣 广告总消耗 (USDT)</div>
+            <div id="st-ad-cost" class="stat-num text-3xl font-extrabold">0.00</div>
+            <div id="st-ad-count" class="text-xs text-emerald-400 mt-1">0 次曝光 / 0 次点击</div>
+          </div>
+          <div class="card rounded-xl p-5">
+            <div class="text-xs text-slate-400 mb-2">🔎 消息索引总数</div>
+            <div id="st-msg" class="stat-num text-3xl font-extrabold">0</div>
+            <div id="st-ch" class="text-xs text-sky-400 mt-1">订阅 0 个频道</div>
+          </div>
+        </div>
+
+        <!-- 图表区 -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+          <div class="card rounded-xl p-5">
+            <div class="text-sm font-semibold mb-3 text-slate-300">📈 近7天 充值 vs 广告消耗 (USDT)</div>
+            <canvas id="chartFinance" height="180"></canvas>
+          </div>
+          <div class="card rounded-xl p-5">
+            <div class="text-sm font-semibold mb-3 text-slate-300">🧑‍🤝‍🧑 用户余额排行榜 (TOP 10)</div>
+            <canvas id="chartUsers" height="180"></canvas>
+          </div>
+        </div>
+
+        <!-- 两列表 -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div class="card rounded-xl p-5">
+            <div class="flex justify-between items-center mb-3">
+              <div class="text-sm font-semibold text-slate-300">📝 最近充值流水</div>
+              <span class="text-xs text-slate-500">最新10条</span>
+            </div>
+            <div class="overflow-auto max-h-[320px]">
+              <table class="w-full text-xs">
+                <thead><tr class="border-b border-slate-700 text-slate-400">
+                  <th class="text-left py-2">时间</th><th class="text-left">用户</th><th class="text-right">金额(U)</th><th class="text-center">状态</th>
+                </tr></thead>
+                <tbody id="table-recharge-mini"></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="card rounded-xl p-5">
+            <div class="flex justify-between items-center mb-3">
+              <div class="text-sm font-semibold text-slate-300">📊 广告投放表现 TOP</div>
+              <span class="text-xs text-slate-500">按消耗排序</span>
+            </div>
+            <div class="overflow-auto max-h-[320px]">
+              <table class="w-full text-xs">
+                <thead><tr class="border-b border-slate-700 text-slate-400">
+                  <th class="text-left py-2">广告主</th><th class="text-left">关键词</th><th class="text-right">消耗/预算</th><th class="text-right">CTR</th><th class="text-center">状态</th>
+                </tr></thead>
+                <tbody id="table-ads-mini"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Tab1: 用户管理 -->
+      <section id="tab-users" class="tab-panel">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-lg font-bold">🧑 用户管理 <span class="text-sm text-slate-400 font-normal" id="userCountLabel">（0 位用户）</span></h2>
+          <div class="flex gap-2">
+            <input id="userSearch" placeholder="🔍 搜索用户名/ID..." oninput="renderUsers()" class="w-64">
+            <select id="userFilter" onchange="renderUsers()" class="w-40">
+              <option value="all">全部角色</option>
+              <option value="advertiser">仅广告主</option>
+              <option value="user">仅普通用户</option>
+            </select>
+          </div>
+        </div>
+        <div class="card rounded-xl overflow-hidden">
+          <div class="max-h-[70vh] overflow-auto">
+            <table class="w-full text-sm">
+              <thead><tr class="border-b border-slate-700 text-slate-400 text-xs">
+                <th class="text-left py-3 px-4">ID</th><th class="text-left">TG ID</th><th class="text-left">用户名</th>
+                <th class="text-left">角色</th><th class="text-right">余额(U)</th><th class="text-right">累计充值</th>
+                <th class="text-right">交易数</th><th class="text-right">邀请数</th><th class="text-left">注册时间</th>
+              </tr></thead>
+              <tbody id="table-users"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Tab2: 频道管理 / 推广（最核心，支持增删改+推荐置顶） -->
+      <section id="tab-channels" class="tab-panel">
+        <div class="flex items-center justify-between mb-4 flex-wrap gap-3">
+          <h2 class="text-lg font-bold">📺 频道管理 · 推广置顶设置</h2>
+          <button onclick="openChannelModal()" class="btn-primary text-sm px-4 py-2 rounded-lg text-white font-semibold">
+            ➕ 新增推广频道 / 群组
+          </button>
+        </div>
+
+        <!-- 卡片：推广状态总览 -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-5">
+          <div class="card rounded-xl p-4"><div class="text-xs text-slate-400">📦 频道总数</div><div id="ch-total" class="stat-num text-2xl font-bold mt-1">0</div></div>
+          <div class="card rounded-xl p-4"><div class="text-xs text-slate-400">⭐ 已推荐置顶</div><div id="ch-featured" class="stat-num text-2xl font-bold mt-1 text-amber-300!">0</div></div>
+          <div class="card rounded-xl p-4"><div class="text-xs text-slate-400">📨 总消息索引</div><div id="ch-msg" class="stat-num text-2xl font-bold mt-1">0</div></div>
+          <div class="card rounded-xl p-4"><div class="text-xs text-slate-400">👥 总成员数</div><div id="ch-members" class="stat-num text-2xl font-bold mt-1">0</div></div>
+        </div>
+
+        <div class="card rounded-xl overflow-hidden">
+          <div class="max-h-[65vh] overflow-auto">
+            <table class="w-full text-sm">
+              <thead><tr class="border-b border-slate-700 text-slate-400 text-xs whitespace-nowrap">
+                <th class="text-left py-3 px-4">排序</th><th class="text-left">频道标题</th><th class="text-left">分类</th>
+                <th class="text-left">@username</th><th class="text-right">成员数</th><th class="text-right">消息数</th>
+                <th class="text-center">采集状态</th><th class="text-center">推荐置顶</th><th class="text-center">操作</th>
+              </tr></thead>
+              <tbody id="table-channels"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Tab3: 广告管理 -->
+      <section id="tab-ads" class="tab-panel">
+        <h2 class="text-lg font-bold mb-4">📣 广告管理 · 投放数据</h2>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-5">
+          <div class="card rounded-xl p-4"><div class="text-xs text-slate-400">🎯 广告计划数</div><div id="ad-total" class="stat-num text-2xl font-bold mt-1">0</div></div>
+          <div class="card rounded-xl p-4"><div class="text-xs text-slate-400">💰 累计消耗</div><div id="ad-spent" class="stat-num text-2xl font-bold mt-1">0</div></div>
+          <div class="card rounded-xl p-4"><div class="text-xs text-slate-400">👁 累计曝光</div><div id="ad-imps" class="stat-num text-2xl font-bold mt-1">0</div></div>
+          <div class="card rounded-xl p-4"><div class="text-xs text-slate-400">🖱 平均CTR</div><div id="ad-ctr" class="stat-num text-2xl font-bold mt-1">0%</div></div>
+        </div>
+        <div class="card rounded-xl overflow-hidden">
+          <div class="max-h-[70vh] overflow-auto">
+            <table class="w-full text-sm">
+              <thead><tr class="border-b border-slate-700 text-slate-400 text-xs">
+                <th class="text-left py-3 px-4">ID</th><th class="text-left">广告主</th><th class="text-left">关键词</th>
+                <th class="text-left">广告标题</th><th class="text-center">计费</th><th class="text-right">消耗/预算</th>
+                <th class="text-right">曝光</th><th class="text-right">点击</th><th class="text-right">CTR</th>
+                <th class="text-center">状态</th><th class="text-left">创建时间</th>
+                <th class="text-right px-4">🛠 操作</th>
+              </tr></thead>
+              <tbody id="table-ads-full"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Tab4: 热门关键词管理 -->
+      <section id="tab-hotwords" class="tab-panel">
+        <h2 class="text-lg font-bold mb-4">🔥 热门关键词管理 <span class="text-sm text-slate-400 font-normal">（用户打开Bot首页时展示，按分类显示）</span></h2>
+        
+        <!-- 分类统计卡片 -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-5" id="hw-stats"></div>
+        
+        <!-- 操作栏 -->
+        <div class="flex gap-3 mb-4 items-center flex-wrap">
+          <select id="hw-filter-category" onchange="loadHotKeywords()" class="!h-9">
+            <option value="">全部分类</option>
+          </select>
+          <button onclick="openHotwordModal()" class="btn-primary !py-2 !px-4 text-sm">➕ 新增关键词</button>
+          <button onclick="openCategoryManager()" class="bg-indigo-600 hover:bg-indigo-500 !py-2 !px-4 text-sm rounded-lg">🗂 分类管理</button>
+          <span class="text-xs text-slate-400 ml-auto">💡 系统默认关键词不可删除，只能禁用；自定义关键词可删除</span>
+        </div>
+        
+        <!-- 分类管理区域 -->
+        <div id="hw-category-manager" class="hidden mb-5 card rounded-xl p-4">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="font-bold">📂 分类管理</h3>
+            <button onclick="closeCategoryManager()" class="text-slate-400 hover:text-white text-sm">✕ 关闭</button>
+          </div>
+          <div class="flex gap-2 mb-3">
+            <input id="cat-name" placeholder="分类名称" class="!h-9 flex-1">
+            <input id="cat-icon" placeholder="图标emoji" class="!h-9 w-24" maxlength="2">
+            <input id="cat-sort" type="number" placeholder="排序" class="!h-9 w-20">
+            <button onclick="addCategory()" class="bg-emerald-600 hover:bg-emerald-500 !py-2 !px-4 text-sm rounded-lg">➕ 添加分类</button>
+          </div>
+          <div id="hw-category-list" class="space-y-2 max-h-60 overflow-auto"></div>
+        </div>
+        
+        <!-- 关键词列表（按分类展示） -->
+        <div id="hw-categories-container" class="space-y-4"></div>
+      </section>
+
+      <!-- Tab5: 充值订单 -->
+      <section id="tab-recharge" class="tab-panel">
+        <h2 class="text-lg font-bold mb-4">💵 充值订单管理</h2>
+        <div class="card rounded-xl overflow-hidden">
+          <div class="max-h-[75vh] overflow-auto">
+            <table class="w-full text-sm">
+              <thead><tr class="border-b border-slate-700 text-slate-400 text-xs">
+                <th class="text-left py-3 px-4">订单号</th><th class="text-left">用户</th><th class="text-left">收款地址</th>
+                <th class="text-right">金额(U)</th><th class="text-center">状态</th><th class="text-left">创建时间</th><th class="text-left">到账时间</th>
+              </tr></thead>
+              <tbody id="table-recharge-full"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Tab5: 交易流水 -->
+      <section id="tab-tx" class="tab-panel">
+        <h2 class="text-lg font-bold mb-4">📒 交易流水（所有用户的资金变动）</h2>
+        <div class="card rounded-xl overflow-hidden">
+          <div class="max-h-[75vh] overflow-auto">
+            <table class="w-full text-sm">
+              <thead><tr class="border-b border-slate-700 text-slate-400 text-xs">
+                <th class="text-left py-3 px-4">ID</th><th class="text-left">用户</th><th class="text-center">类型</th>
+                <th class="text-right">变动金额</th><th class="text-right">变动后余额</th><th class="text-left">描述</th><th class="text-left">时间</th>
+              </tr></thead>
+              <tbody id="table-tx"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Tab6: 系统监控 -->
+      <section id="tab-system" class="tab-panel">
+        <h2 class="text-lg font-bold mb-4">🖥 系统监控 · 运行状态</h2>
+        <div id="system-cards" class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-5"></div>
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-5">
+          <div class="card rounded-xl p-5">
+            <div class="text-sm font-semibold mb-3">📊 近7天新增用户</div>
+            <canvas id="chartNewUsers" height="180"></canvas>
+          </div>
+          <div class="card rounded-xl p-5">
+            <div class="text-sm font-semibold mb-3">📊 近7天搜索量（估算）</div>
+            <canvas id="chartSearches" height="180"></canvas>
+          </div>
+        </div>
+        <div class="card rounded-xl p-5">
+          <div class="text-sm font-semibold mb-3">🤖 Telethon 采集账号池状态</div>
+          <table class="w-full text-sm">
+            <thead><tr class="border-b border-slate-700 text-slate-400 text-xs">
+              <th class="text-left py-2 px-2">#</th><th class="text-left">手机号</th><th class="text-right">已加入频道</th>
+              <th class="text-right">今日Join</th><th class="text-center">状态</th><th class="text-left">最近活跃</th>
+            </tr></thead>
+            <tbody id="table-accounts"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Tab7: 小号 / 代理管理 -->
+      <section id="tab-crawler" class="tab-panel">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-lg font-bold">🐢 小号 / 代理管理 <span class="text-sm text-slate-400 font-normal">（Telethon 采集账号池，支持健康度检测+独立代理配置）</span></h2>
+          <div class="flex gap-2">
+            <button id="btn-check-all" onclick="checkAllHealth()" class="btn-primary !py-2 !px-4 text-sm">🩺 一键健康检测(全部)</button>
+            <button onclick="openCrawlerModal()" class="btn-primary !py-2 !px-4 text-sm">➕ 新增小号</button>
+            <button onclick="openProxyModal()" class="btn-secondary !py-2 !px-4 text-sm">🌐 代理管理</button>
+          </div>
+        </div>
+
+        <!-- 代理管理区域 -->
+        <div class="card rounded-xl p-4 mb-5">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="text-sm font-semibold">🌐 已添加代理</h3>
+            <button onclick="openProxyModal()" class="text-xs px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white">➕ 添加代理</button>
+          </div>
+          <div id="proxy-list" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3"></div>
+          <div id="proxy-empty" class="text-center py-6 text-slate-500 text-sm hidden">暂无代理，请先添加代理</div>
+        </div>
+        <div id="crawler-summary" class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3 mb-5"></div>
+        <div class="card rounded-xl p-4 mb-4 flex flex-wrap gap-3 items-end text-sm">
+          <div><label class="text-xs text-slate-400 block">搜索(手机/用户名/备注/代理)</label><input id="ca-q" oninput="loadCrawler()" placeholder="如 +852 / crawler_002 / socks5" class="!h-9 min-w-[220px]"></div>
+          <div><label class="text-xs text-slate-400 block">状态筛选</label><select id="ca-status" onchange="loadCrawler()" class="!h-9"><option value="">全部</option><option value="active">可用</option><option value="limited">限流</option><option value="banned">封禁</option><option value="need_verify">需验证</option></select></div>
+          <div><label class="text-xs text-slate-400 block">代理模式</label><select id="ca-proxy" onchange="loadCrawler()" class="!h-9"><option value="">全部</option><option value="custom">独立代理IP</option><option value="system">跟随系统代理</option><option value="none">无代理(直连)</option></select></div>
+          <div class="ml-auto text-xs text-slate-400" id="ca-count"></div>
+        </div>
+        <div class="card rounded-xl overflow-hidden">
+          <table class="w-full text-sm">
+            <thead><tr class="bg-slate-800/50 text-slate-300 text-xs">
+              <th class="text-left py-2.5 px-3">#</th>
+              <th class="text-left">手机号 / 用户名</th>
+              <th class="text-center">健康分</th>
+              <th class="text-center">状态</th>
+              <th class="text-right">频道</th>
+              <th class="text-right">今日 Join/Search/Msg</th>
+              <th class="text-left">代理模式 / 代理地址</th>
+              <th class="text-left">最近检测</th>
+              <th class="text-center">操作</th>
+            </tr></thead>
+            <tbody id="table-crawler" class="divide-y divide-slate-800"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Tab8: 机器人菜单设置 -->
+      <section id="tab-botmenu" class="tab-panel">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-lg font-bold">🤖 机器人菜单设置 <span class="text-sm text-slate-400 font-normal">（命令/子菜单/内联按钮/跳转链接 增删改排序，改完立即生效）</span></h2>
+          <div class="flex gap-2">
+            <select id="bm-role" onchange="loadMenus()" class="!h-9"><option value="all">全部用户可见</option><option value="user">普通用户</option><option value="advertiser">仅广告主</option><option value="admin">仅管理员</option></select>
+            <button onclick="openMenuModal()" class="btn-primary !py-2 !px-4 text-sm">➕ 新增菜单项</button>
+          </div>
+        </div>
+        <div id="bm-summary" class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5"></div>
+        <div class="grid grid-cols-1 lg:grid-cols-5 gap-5">
+          <div class="lg:col-span-3 card rounded-xl p-5">
+            <div class="text-sm font-semibold mb-3">🧩 菜单结构（tree，可拖拽排序保存，点击行编辑）</div>
+            <div id="menus-tree" class="space-y-2"></div>
+          </div>
+          <div class="lg:col-span-2 card rounded-xl p-5">
+            <div class="text-sm font-semibold mb-3">📱 用户侧预览（BotFather 键盘 + 内联按钮）</div>
+            <div class="mx-auto max-w-[360px] bg-slate-950 rounded-3xl border border-slate-700 p-2 shadow-xl">
+              <div class="flex items-center gap-2 px-3 py-2 bg-slate-900 rounded-t-2xl text-xs">
+                <div class="w-8 h-8 rounded-full bg-gradient-to-br from-sky-400 to-indigo-500 flex items-center justify-center text-sm">🔍</div>
+                <div class="ml-1 flex-1">
+                  <div class="font-bold">TG 搜索 Bot</div>
+                  <div class="text-emerald-400 text-[10px]">● online</div>
+                </div>
+                <div class="text-slate-500">…</div>
+              </div>
+              <div class="h-64 bg-slate-900/30 rounded-b-2xl p-3 text-xs space-y-2 mt-1 overflow-auto">
+                <div class="bg-slate-800/60 inline-block rounded-2xl rounded-tl-sm px-3 py-2 max-w-[85%]">
+                  欢迎使用 TG 搜索 Bot 👋<br>输入关键词直接搜索；点击下方键盘按钮查看更多功能 ↓
+                </div>
+                <div class="text-right"><div class="inline-block bg-sky-600/80 rounded-2xl rounded-tr-sm px-3 py-1.5">请显示主菜单</div></div>
+                <div class="bg-emerald-700/40 border border-emerald-700/60 rounded-2xl rounded-tl-sm px-3 py-2 text-emerald-100">
+                  🎁 邀请好友充值可获得 8% 永久返佣，点击下方按钮领取你的专属邀请链接 👇
+                </div>
+                <div id="bm-preview-inline" class="grid grid-cols-1 gap-1.5"></div>
+              </div>
+              <div id="bm-preview-keyboard" class="grid grid-cols-3 gap-1.5 mt-2 px-1 pb-1"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Tab9: 系统升级 / 维护 -->
+      <section id="tab-ops" class="tab-panel">
+        <h2 class="text-lg font-bold mb-4">🛠 系统升级 / 维护 <span class="text-sm text-slate-400 font-normal">（版本更新/回滚/清理缓存/环境检测/一键修复/DB备份恢复）</span></h2>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">
+          <!-- 清理缓存 -->
+          <div class="card rounded-xl p-5">
+            <div class="text-sm font-semibold mb-3 flex items-center justify-between">
+              <span>🧹 清理缓存</span>
+              <span class="text-xs text-slate-400">按类型勾选后清理</span>
+            </div>
+            <div class="grid grid-cols-2 gap-2 text-xs">
+              <label class="flex items-center gap-2"><input type="checkbox" id="cache-session" checked> 过期登录 Session (7天)</label>
+              <label class="flex items-center gap-2"><input type="checkbox" id="cache-jieba" checked> Jieba 分词缓存</label>
+              <label class="flex items-center gap-2"><input type="checkbox" id="cache-search" checked> 搜索命中内存缓存</label>
+              <label class="flex items-center gap-2"><input type="checkbox" id="cache-uploads"> 过期上传临时文件(3天)</label>
+              <label class="flex items-center gap-2"><input type="checkbox" id="cache-demo"> 临时演示旧 .db 文件</label>
+              <label class="flex items-center gap-2"><input type="checkbox" id="cache-log" checked> 30 天前日志文件</label>
+            </div>
+            <button id="btn-cache" onclick="runClearCache()" class="btn-primary mt-4 w-full !py-2">🧹 清理选中缓存</button>
+            <div id="cache-result" class="text-xs mt-3 space-y-1"></div>
+          </div>
+
+          <!-- 环境检测 / 一键修复 -->
+          <div class="card rounded-xl p-5">
+            <div class="text-sm font-semibold mb-3">🔎 系统运营环境检测 &nbsp;<span id="ops-env-summary" class="text-xs text-slate-400 font-normal"></span></div>
+            <div class="overflow-x-auto rounded-lg border border-slate-700 max-h-[230px] overflow-y-auto">
+              <table class="table text-xs">
+                <thead class="bg-slate-800/60 text-xs text-slate-300">
+                  <tr>
+                    <th>检测项</th><th style="width:90px">结果</th><th>详情</th><th style="width:180px">修复建议</th>
+                  </tr>
+                </thead>
+                <tbody id="ops-env-body"><tr><td colspan="4" class="text-slate-500 text-center py-3">点下方「🔎 开始检测」开始</td></tr></tbody>
+              </table>
+            </div>
+            <div class="flex gap-2 mt-4">
+              <button id="btn-env-check" onclick="loadEnvCheck()" class="btn-primary flex-1 !py-2 text-sm">🔎 开始检测</button>
+              <button id="btn-repair" onclick="runRepair()" class="btn-warn flex-1 !py-2 text-sm">🔧 一键修复</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 版本管理：上传/备份/回滚 -->
+        <div class="card rounded-xl p-5 mb-5">
+          <div class="flex items-center justify-between mb-4">
+            <div class="text-sm font-semibold">📦 版本更新与回滚（上传升级包后自动备份 DB，更新不丢数据）</div>
+            <div class="text-xs text-slate-400">当前版本 <span class="text-white font-bold">v1.0.0</span> &nbsp; · &nbsp; 2026-08-21 首次上线</div>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <!-- 上传新版本 -->
+            <div class="border border-slate-700 rounded-xl p-4">
+              <div class="text-xs font-semibold mb-3">⬆️ 上传新版本升级包 (.zip / .tar.gz)</div>
+              <form id="upload-form" onsubmit="submitUpdate(event)" enctype="multipart/form-data">
+                <label class="block mb-2">
+                  <span class="text-xs text-slate-400">升级包文件</span>
+                  <input id="file-input" name="file" type="file" accept=".zip,.tar.gz" class="mt-1 w-full">
+                </label>
+                <label class="block mb-2">
+                  <span class="text-xs text-slate-400">ChangeLog 说明（会写入版本历史）</span>
+                  <textarea name="changelog" rows="2" class="mt-1 w-full" placeholder="例如：修复菜单排序 bug、新增小号代理检测、优化搜索响应速度"></textarea>
+                </label>
+                <div class="grid grid-cols-2 gap-2 text-xs mb-3">
+                  <label class="flex items-center gap-2"><input type="checkbox" name="autobackup" value="1" checked> 升级前自动备份 DB</label>
+                  <label class="flex items-center gap-2"><input type="checkbox" name="autorestart" value="1" checked> 完成后自动重启</label>
+                </div>
+                <button id="btn-upload" type="submit" class="btn-primary w-full !py-2">🚀 上传并部署（含自动备份）</button>
+              </form>
+            </div>
+
+            <!-- 历史版本 / 回滚列表 -->
+            <div class="border border-slate-700 rounded-xl p-4">
+              <div class="flex items-center justify-between mb-3">
+                <div class="text-xs font-semibold">📜 版本历史（可回滚）</div>
+                <button onclick="loadVersions()" class="text-xs text-sky-400 hover:text-sky-300">刷新</button>
+              </div>
+              <div class="overflow-x-auto rounded-lg border border-slate-700 max-h-[280px] overflow-y-auto">
+                <table class="table text-xs">
+                  <thead class="bg-slate-800/60 text-xs text-slate-300">
+                    <tr><th>版本</th><th>文件/大小/上传者</th><th style="width:90px">状态</th><th style="width:140px">DB备份</th><th style="width:100px">操作</th></tr>
+                  </thead>
+                  <tbody id="ops-versions-body">
+                    <tr><td colspan="5" class="text-center text-slate-500 py-3">点刷新加载</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <div class="mt-5 border-t border-slate-800 pt-4">
+            <div class="text-xs font-semibold mb-3">📋 更新日志 & 版本迭代展示（ChangeLog）</div>
+            <div id="ops-changelog" class="space-y-3 text-xs max-h-[220px] overflow-auto pr-2"></div>
+          </div>
+        </div>
+
+        <!-- 🗄 DB 备份 / 恢复（危机人工恢复） -->
+        <div class="card rounded-xl p-5">
+          <div class="flex items-center justify-between mb-4">
+            <div class="text-sm font-semibold">🗄 数据库 &amp; 参数设置 备份/恢复（危机人工恢复专用）</div>
+            <button onclick="loadBackups()" class="text-xs text-sky-400 hover:text-sky-300">刷新列表</button>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+            <!-- 立即手动备份 -->
+            <div class="border border-slate-700 rounded-xl p-4">
+              <div class="text-xs font-semibold mb-3">⚡ 立即备份 (一键打包)</div>
+              <label class="block mb-2">
+                <span class="text-xs text-slate-400">管理员备注</span>
+                <input id="bk-note" class="mt-1 w-full" placeholder="例如：升级 v1.0.1 前备份 / 每日日终快照">
+              </label>
+              <button id="btn-create-backup" onclick="createBackupNow()" class="btn-primary w-full !py-2">💾 创建备份（DB+菜单+小号 打包 ZIP）</button>
+              <div id="bk-last-result" class="text-xs mt-2"></div>
+            </div>
+
+            <!-- 宝塔定时备份 -->
+            <div class="border border-slate-700 rounded-xl p-4">
+              <div class="text-xs font-semibold mb-3">⏰ 宝塔定时自动备份（一键复制配置）</div>
+              <div id="bk-cron" class="text-xs text-slate-300 bg-slate-800/60 p-3 rounded-lg border border-slate-700 font-mono whitespace-pre-wrap break-all max-h-[230px] overflow-y-auto">加载中...</div>
+              <button onclick="copyCron()" class="btn-ghost mt-2 w-full !py-1.5 text-sm">📋 复制 Shell 到剪贴板</button>
+              <div class="text-[11px] text-slate-500 mt-2">宝塔面板 → 计划任务 → 类型=Shell 脚本 → 周期选 Cron 表达式 → 粘贴进去（密码建议先改成你自己的管理员密码）</div>
+            </div>
+
+            <!-- 上传 & 恢复 -->
+            <div class="border border-slate-700 rounded-xl p-4">
+              <div class="text-xs font-semibold mb-3">⬆️ 上传备份文件（危机恢复）</div>
+              <form id="restore-form" onsubmit="submitRestore(event)" enctype="multipart/form-data">
+                <label class="block mb-2">
+                  <span class="text-xs text-slate-400">.zip 或 .db</span>
+                  <input name="file" type="file" accept=".zip,.db" class="mt-1 w-full text-xs">
+                </label>
+                <label class="flex items-center gap-2 text-xs mb-3">
+                  <input name="do_restore" type="checkbox" value="1"> 上传后<strong class="text-rose-300">立即覆盖当前 DB</strong>（默认仅校验不替换，防误操作）
+                </label>
+                <button class="btn-warn w-full !py-2" type="submit">📥 上传并校验（可勾选后一键恢复）</button>
+              </form>
+              <div id="bk-restore-result" class="text-xs mt-2"></div>
+            </div>
+          </div>
+
+          <!-- 备份文件列表（可下载） -->
+          <div class="overflow-x-auto rounded-lg border border-slate-700">
+            <table class="table text-xs">
+              <thead class="bg-slate-800/60 text-slate-300">
+                <tr>
+                  <th style="width:180px">文件名</th>
+                  <th style="width:100px">分类</th>
+                  <th style="width:110px">大小</th>
+                  <th style="width:170px">创建时间</th>
+                  <th style="width:180px">操作</th>
+                </tr>
+              </thead>
+              <tbody id="ops-backups-body">
+                <tr><td colspan="5" class="text-center text-slate-500 py-3">点上面的「立即备份」或「刷新」生成</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Tab10: 系统配置 -->
+      <section id="tab-settings" class="tab-panel">
+        <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
+          <div>
+            <h2 class="text-lg font-bold">⚙️ 系统配置 <span class="text-sm text-slate-400 font-normal">（除 HD 钱包助记词外，全部在此页面修改保存，即时生效）</span></h2>
+            <div class="text-xs text-slate-400 mt-1">
+              版本 <span id="settings-version" class="text-slate-300">-</span>
+              · 可后台修改 <b id="settings-editable-count" class="text-emerald-300">0</b> 项
+              · <span id="settings-rule" class="text-amber-300"></span>
+            </div>
+          </div>
+          <div class="flex gap-2">
+            <button onclick="loadSettings()" class="btn-ghost !py-2 text-sm">🔄 重新加载</button>
+            <button onclick="saveAllSettings()" class="btn-primary !py-2 text-sm">💾 保存全部并生效</button>
+          </div>
+        </div>
+
+        <!-- 顶部安全提示 -->
+        <div id="settings-env-only" class="card rounded-xl p-4 mb-5 border border-amber-600/40 bg-amber-900/10 hidden"></div>
+
+        <!-- 分组 Tabs -->
+        <div id="settings-group-tabs" class="flex flex-wrap gap-2 mb-5"></div>
+
+        <!-- 表单内容 -->
+        <div id="settings-form-area" class="card rounded-xl p-6 mb-5">
+          <div class="text-center text-slate-400 text-sm py-10">加载中...</div>
+        </div>
+
+        <!-- 底部操作 -->
+        <div class="flex justify-end gap-2">
+          <button onclick="loadSettings()" class="btn-ghost !py-2">🔄 放弃修改 / 还原</button>
+          <button onclick="saveAllSettings()" class="btn-primary !py-2 !px-8">💾 保存全部并生效</button>
+        </div>
+      </section>
+
+    </main>
+  </div>
+</div>
+
+<!-- ========== 新增/编辑频道 弹窗 ========== -->
+<div id="channelModal" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+  <div class="card rounded-2xl w-full max-w-lg p-6 max-h-[90vh] overflow-auto">
+    <div class="flex items-center justify-between mb-4">
+      <h3 id="modalTitle" class="font-bold text-lg">➕ 新增推广频道</h3>
+      <button onclick="closeChannelModal()" class="text-slate-400 hover:text-white text-xl">✕</button>
+    </div>
+    <form onsubmit="submitChannel(event)" class="space-y-3 text-sm">
+      <input type="hidden" id="ch-edit-id" value="">
+      <div>
+        <label class="text-xs text-slate-400 block mb-1">📌 频道标题 <span class="text-rose-400">*</span></label>
+        <input id="ch-title" type="text" required placeholder="如：🚀 我的官方主频道" class="w-full">
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="text-xs text-slate-400 block mb-1">🏷 TG频道ID(负数)</label>
+          <input id="ch-tgid" type="number" step="1" placeholder="留空=自动生成负数">
+        </div>
+        <div>
+          <label class="text-xs text-slate-400 block mb-1">@ 频道/群组用户名</label>
+          <input id="ch-username" type="text" placeholder="如：my_channel_official">
+        </div>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="text-xs text-slate-400 block mb-1">📂 分类</label>
+          <select id="ch-category" class="w-full">
+            <option>官方推荐</option><option>加密资讯</option><option>AI技术</option>
+            <option>编程开发</option><option>DeFi</option><option>NFT</option>
+            <option>社群群组</option><option>课程推广</option><option>其他</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-xs text-slate-400 block mb-1">👥 成员数</label>
+          <input id="ch-members" type="number" value="1000">
+        </div>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="text-xs text-slate-400 block mb-1">⭐ 推荐置顶？</label>
+          <select id="ch-featured" class="w-full">
+            <option value="1">✅ 置顶推荐（展示给用户）</option>
+            <option value="0">❌ 不推荐</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-xs text-slate-400 block mb-1">🔢 排序（越小越靠前）</label>
+          <input id="ch-sort" type="number" value="10">
+        </div>
+      </div>
+      <div>
+        <label class="text-xs text-slate-400 block mb-1">📝 推荐简介（显示给用户看）</label>
+        <textarea id="ch-desc" rows="3" class="w-full" placeholder="用一句话吸引用户点击进入你的频道/群，例如：免费领取100G资料包、高净值玩家群、VIP会员专属..."></textarea>
+      </div>
+      <div>
+        <label class="text-xs text-slate-400 block mb-1">🔗 直达链接（点击跳转）</label>
+        <input id="ch-url" type="text" class="w-full" placeholder="如：https://t.me/my_channel_official">
+      </div>
+      <div class="flex gap-2 pt-3 border-t border-slate-700">
+        <button type="button" onclick="closeChannelModal()" class="flex-1 py-2 rounded-lg bg-slate-700 hover:bg-slate-600">取消</button>
+        <button type="submit" class="flex-1 py-2 rounded-lg btn-primary text-white font-semibold">💾 保存</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ========== 新增/编辑小号 弹窗 ========== -->
+<div id="crawlerModal" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+  <div class="card rounded-2xl w-full max-w-2xl p-6 max-h-[92vh] overflow-auto">
+    <div class="flex items-center justify-between mb-4">
+      <h3 id="crawlerModalTitle" class="font-bold text-lg">➕ 新增小号</h3>
+      <button onclick="closeCrawlerModal()" class="text-slate-400 hover:text-white text-xl">✕</button>
+    </div>
+
+    <!-- 步骤指示器（仅新增时显示） -->
+    <div id="ca-stepper" class="flex items-center justify-between mb-5 px-2">
+      <div id="ca-step-indicator-1" class="flex items-center gap-2 text-xs">
+        <span class="ca-step-dot w-6 h-6 rounded-full bg-sky-500 text-white flex items-center justify-center font-bold">1</span>
+        <span class="text-sky-300">发送验证码</span>
+      </div>
+      <div class="flex-1 h-0.5 bg-slate-700 mx-2" id="ca-bar-1"></div>
+      <div id="ca-step-indicator-2" class="flex items-center gap-2 text-xs">
+        <span class="ca-step-dot w-6 h-6 rounded-full bg-slate-700 text-slate-400 flex items-center justify-center font-bold">2</span>
+        <span class="text-slate-400">验证码登录</span>
+      </div>
+      <div class="flex-1 h-0.5 bg-slate-700 mx-2" id="ca-bar-2"></div>
+      <div id="ca-step-indicator-3" class="flex items-center gap-2 text-xs">
+        <span class="ca-step-dot w-6 h-6 rounded-full bg-slate-700 text-slate-400 flex items-center justify-center font-bold">3</span>
+        <span class="text-slate-400">配置 & 保存</span>
+      </div>
+    </div>
+
+    <input type="hidden" id="ca-edit-id" value="">
+    <input type="hidden" id="ca-verified" value="false">
+    <input type="hidden" id="ca-tg-uid" value="">
+    <input type="hidden" id="ca-tg-uname" value="">
+    <input type="hidden" id="ca-session-file" value="">
+    <input type="hidden" id="ca-phone-code-hash" value="">
+
+    <!-- ===== 步骤1：填写手机号 + api凭证 → 发送验证码 ===== -->
+    <div id="ca-step1" class="space-y-3 text-sm">
+      <div class="bg-amber-900/30 border border-amber-700/50 rounded-lg p-3 text-xs text-amber-200">
+        🔐 新增小号需通过 Telegram 验证码登录，确保账号真实可用。请先填写手机号和 API 凭证。
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="text-xs text-slate-400 block mb-1">📱 手机号 <span class="text-rose-400">*</span></label>
+          <input id="ca-phone" class="w-full" placeholder="+8613800138000" oninput="onCrawlerPhoneInput()">
+        </div>
+        <div>
+          <label class="text-xs text-slate-400 block mb-1">api_id（Telegram）<span class="text-rose-400">*</span></label>
+          <input id="ca-api-id" type="number" class="w-full" placeholder="例如 12345678">
+        </div>
+      </div>
+      <div>
+        <label class="text-xs text-slate-400 block mb-1">api_hash <span class="text-rose-400">*</span></label>
+        <input id="ca-api-hash" class="w-full" placeholder="32 位 hash">
+      </div>
+      <div class="bg-slate-800/50 rounded-lg p-3 text-xs text-slate-400">
+        💡 <b>如何获取 api_id / api_hash？</b><br>
+        访问 <a href="https://my.telegram.org" target="_blank" class="text-sky-400 underline">my.telegram.org</a> → API development tools → 创建应用即可获取。<br>
+        <span class="text-amber-300">演示模式：api_id 填 12345、api_hash 填 deadbeef 开头即可，验证码为 12345。</span>
+      </div>
+      <div id="ca-send-code-result" class="text-xs"></div>
+      <div class="flex gap-3 pt-2">
+        <button type="button" onclick="sendCrawlerCode()" id="ca-btn-send-code" class="btn-primary flex-1 !py-2">📤 发送验证码</button>
+        <button type="button" onclick="closeCrawlerModal()" class="flex-1 py-2 rounded-lg bg-slate-700 hover:bg-slate-600">取消</button>
+      </div>
+    </div>
+
+    <!-- ===== 步骤2：输入验证码 → 验证登录 ===== -->
+    <div id="ca-step2" class="space-y-3 text-sm hidden">
+      <div class="bg-sky-900/30 border border-sky-700/50 rounded-lg p-3 text-xs text-sky-200">
+        📩 验证码已发送到 <b id="ca-phone-display"></b>，请输入收到的验证码。
+      </div>
+      <div>
+        <label class="text-xs text-slate-400 block mb-1">🔑 验证码 <span class="text-rose-400">*</span></label>
+        <input id="ca-code" class="w-full text-center text-2xl tracking-[0.5em] font-bold" placeholder="1 2 3 4 5" maxlength="7">
+      </div>
+      <div id="ca-verify-result" class="text-xs"></div>
+      <div class="flex gap-3 pt-2">
+        <button type="button" onclick="verifyCrawlerCode()" id="ca-btn-verify" class="btn-primary flex-1 !py-2">✅ 验证登录</button>
+        <button type="button" onclick="showCrawlerStep(1)" class="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-xs">← 重新发送</button>
+      </div>
+    </div>
+
+    <!-- ===== 步骤2-FA：两步验证密码（仅需要时显示） ===== -->
+    <div id="ca-step2fa" class="space-y-3 text-sm hidden">
+      <div class="bg-amber-900/30 border border-amber-700/50 rounded-lg p-3 text-xs text-amber-200">
+        🔒 该账号开启了两步验证（2FA），请输入两步验证密码。
+      </div>
+      <div>
+        <label class="text-xs text-slate-400 block mb-1">🔑 两步验证密码 <span class="text-rose-400">*</span></label>
+        <input id="ca-2fa-pwd" type="password" class="w-full" placeholder="********">
+      </div>
+      <div id="ca-2fa-result" class="text-xs"></div>
+      <div class="flex gap-3 pt-2">
+        <button type="button" onclick="verifyCrawler2FA()" id="ca-btn-2fa" class="btn-primary flex-1 !py-2">✅ 确认密码</button>
+        <button type="button" onclick="showCrawlerStep(2)" class="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-xs">← 返回</button>
+      </div>
+    </div>
+
+    <!-- ===== 步骤3：配置代理 + 配额 + 保存 ===== -->
+    <div id="ca-step3" class="space-y-3 text-sm hidden">
+      <div class="bg-emerald-900/30 border border-emerald-700/50 rounded-lg p-3 text-xs text-emerald-200">
+        ✅ Telegram 登录验证成功！<br>
+        <span id="ca-login-info"></span>
+      </div>
+
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="text-xs text-slate-400 block mb-1">👤 TG 用户名</label>
+          <input id="ca-tguname" class="w-full" placeholder="crawler_001">
+        </div>
+        <div>
+          <label class="text-xs text-slate-400 block mb-1">session 文件路径</label>
+          <input id="ca-sess" class="w-full" placeholder="crawler_001.session">
+        </div>
+      </div>
+
+      <div class="border-t border-slate-700 pt-3">
+        <div class="text-xs font-semibold mb-2">🌐 代理 IP 配置</div>
+        <!-- 选择已添加的代理 -->
+        <div class="mb-3">
+          <label class="text-xs text-slate-400 block mb-1">选择已添加的代理</label>
+          <select id="ca-proxy-select" onchange="onProxySelectChange()" class="w-full mb-2">
+            <option value="">— 不选择（手动配置）—</option>
+          </select>
+          <button type="button" onclick="openProxyModal()" class="text-xs text-sky-400 hover:text-sky-300">➕ 添加新代理</button>
+        </div>
+        <div class="grid grid-cols-3 gap-3 mb-2">
+          <div>
+            <label class="text-xs text-slate-400 block mb-1">模式</label>
+            <select id="ca-pmode" onchange="toggleProxyFields()" class="w-full">
+              <option value="system">跟随系统代理</option>
+              <option value="custom">独立代理 IP（推荐，防关联）</option>
+              <option value="none">无代理 / 直连</option>
+            </select>
+          </div>
+          <div>
+            <label class="text-xs text-slate-400 block mb-1">协议</label>
+            <select id="ca-pproto" class="w-full">
+              <option value="http">HTTP</option><option value="https">HTTPS</option><option value="socks5">SOCKS5</option><option value="socks4">SOCKS4</option>
+            </select>
+          </div>
+          <div>
+            <label class="text-xs text-slate-400 block mb-1">端口</label>
+            <input id="ca-pport" type="number" placeholder="1080 / 8080" class="w-full">
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-3 mb-2">
+          <div>
+            <label class="text-xs text-slate-400 block mb-1">代理 Host（IP 或域名）</label>
+            <input id="ca-phost" class="w-full" placeholder="103.xx.xx.xx 或 proxy.example.com">
+          </div>
+          <div></div>
+          <div>
+            <label class="text-xs text-slate-400 block mb-1">代理账号（留空=无鉴权）</label>
+            <input id="ca-puser" class="w-full" placeholder="proxy_user">
+          </div>
+          <div>
+            <label class="text-xs text-slate-400 block mb-1">代理密码</label>
+            <input id="ca-ppwd" type="password" class="w-full" placeholder="********">
+          </div>
+        </div>
+        <button type="button" onclick="testProxyFromModal()" class="text-xs px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white">🔬 检测此代理是否畅通</button>
+        <div id="ca-proxy-test-result" class="text-xs mt-2"></div>
+      </div>
+
+      <div class="border-t border-slate-700 pt-3">
+        <div class="text-xs font-semibold mb-2">📊 配额（日限：加群数/搜索/消息拉取）</div>
+        <div class="grid grid-cols-3 gap-3">
+          <div><label class="text-xs text-slate-400 block mb-1">加群/日</label><input id="ca-jlimit" type="number" class="w-full" value="50"></div>
+          <div><label class="text-xs text-slate-400 block mb-1">搜索/日</label><input id="ca-slimit" type="number" class="w-full" value="5000"></div>
+          <div><label class="text-xs text-slate-400 block mb-1">消息/日</label><input id="ca-mlimit" type="number" class="w-full" value="20000"></div>
+        </div>
+      </div>
+
+      <div>
+        <label class="text-xs text-slate-400 block mb-1">备注</label>
+        <textarea id="ca-remark" rows="2" class="w-full" placeholder="如：香港住宅节点、不用于加群仅用于搜索、限流休息"></textarea>
+      </div>
+
+      <!-- 编辑模式专用：状态选择（新增时固定为active） -->
+      <div id="ca-edit-status-block" class="hidden">
+        <label class="text-xs text-slate-400 block mb-1">当前状态</label>
+        <select id="ca-status-sel" class="w-full">
+          <option value="active">可用</option>
+          <option value="limited">限流</option>
+          <option value="banned">封禁</option>
+          <option value="need_verify">需验证</option>
+        </select>
+      </div>
+
+      <div class="flex gap-3 pt-2">
+        <button type="button" onclick="submitCrawler()" class="btn-primary flex-1 !py-2">💾 保存小号</button>
+        <button type="button" onclick="closeCrawlerModal()" class="flex-1 py-2 rounded-lg bg-slate-700 hover:bg-slate-600">取消</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ========== 代理管理弹窗 ========== -->
+<div id="proxyModal" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+  <div class="card rounded-2xl w-full max-w-lg p-6 max-h-[92vh] overflow-auto">
+    <div class="flex items-center justify-between mb-4">
+      <h3 id="proxyModalTitle" class="font-bold text-lg">➕ 添加代理</h3>
+      <button onclick="closeProxyModal()" class="text-slate-400 hover:text-white text-xl">✕</button>
+    </div>
+    <!-- 模式切换：手动 / 订阅 -->
+    <div class="mb-4 flex rounded-lg overflow-hidden border border-slate-700 text-xs">
+      <button id="pm-tab-manual" type="button" onclick="switchProxyTab('manual')" class="flex-1 px-3 py-2 bg-sky-700 text-white">✏️ 手动添加</button>
+      <button id="pm-tab-sub"    type="button" onclick="switchProxyTab('sub')"    class="flex-1 px-3 py-2 bg-slate-800 text-slate-300 hover:bg-slate-700">📡 订阅节点</button>
+    </div>
+    <form onsubmit="submitProxy(event)" class="space-y-3 text-sm">
+      <input type="hidden" id="proxy-edit-id" value="">
+      <div id="pm-sub-panel" class="hidden space-y-3 border border-slate-700 rounded-lg p-3 bg-slate-800/50">
+        <div>
+          <label class="text-xs text-slate-400 block mb-1">📡 订阅 URL（支持 base64 / plaintext / Surge / Clash 多行格式）</label>
+          <textarea id="proxy-sub-url" rows="3" placeholder="http://example.com/sub?token=xxxx&#10;或粘贴多行 协议://user:pass@host:port&#10;或粘贴 BASE64 编码内容" class="w-full"></textarea>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="text-xs text-slate-400 block mb-1">🔄 自动刷新间隔（分钟，0=手动）</label>
+            <input id="proxy-sub-refresh" type="number" min="0" max="1440" value="360" class="w-full">
+          </div>
+          <div>
+            <label class="text-xs text-slate-400 block mb-1">🏷 节点名前缀（可选）</label>
+            <input id="proxy-sub-prefix" placeholder="如：机场A-" class="w-full">
+          </div>
+        </div>
+        <div class="flex gap-2">
+          <button type="button" onclick="parseSubNow()" class="text-xs px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-white">📥 解析订阅并预览</button>
+          <span id="proxy-sub-stat" class="text-xs text-slate-400 self-center">未解析</span>
+        </div>
+        <div id="proxy-sub-preview" class="hidden max-h-48 overflow-y-auto text-xs border border-slate-700 rounded p-2"></div>
+      </div>
+      <div id="pm-manual-panel" class="space-y-3">
+      <div>
+        <label class="text-xs text-slate-400 block mb-1">代理名称 <span class="text-rose-400">*</span></label>
+        <input id="proxy-name" required placeholder="如：香港住宅代理、日本SOCKS5" class="w-full">
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="text-xs text-slate-400 block mb-1">协议</label>
+          <select id="proxy-protocol" class="w-full">
+            <option value="http">HTTP</option>
+            <option value="https">HTTPS</option>
+            <option value="socks5">SOCKS5</option>
+            <option value="socks4">SOCKS4</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-xs text-slate-400 block mb-1">端口 <span class="text-rose-400">*</span></label>
+          <input id="proxy-port" type="number" required placeholder="1080" class="w-full">
+        </div>
+      </div>
+      <div>
+        <label class="text-xs text-slate-400 block mb-1">代理 Host（IP 或域名） <span class="text-rose-400">*</span></label>
+        <input id="proxy-host" required placeholder="103.xx.xx.xx 或 proxy.example.com" class="w-full">
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="text-xs text-slate-400 block mb-1">代理账号（留空=无鉴权）</label>
+          <input id="proxy-username" class="w-full" placeholder="proxy_user">
+        </div>
+        <div>
+          <label class="text-xs text-slate-400 block mb-1">代理密码</label>
+          <input id="proxy-password" type="password" class="w-full" placeholder="********">
+        </div>
+      </div>
+      </div>
+      <div class="flex gap-3">
+        <button type="button" onclick="testProxyFromModal()" class="text-xs px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white">🔬 检测此代理是否畅通</button>
+        <button type="button" onclick="saveProxyAndClose()" class="btn-primary flex-1 !py-2">💾 保存代理</button>
+      </div>
+      <div id="proxy-test-result" class="text-xs mt-2"></div>
+    </form>
+  </div>
+</div>
+
+<!-- ========== 新增/编辑机器人菜单项 弹窗 ========== -->
+<div id="menuModal" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+  <div class="card rounded-2xl w-full max-w-2xl p-6 max-h-[92vh] overflow-auto">
+    <div class="flex items-center justify-between mb-4">
+      <h3 id="menuModalTitle" class="font-bold text-lg">➕ 新增菜单项</h3>
+      <button onclick="closeMenuModal()" class="text-slate-400 hover:text-white text-xl">✕</button>
+    </div>
+    <form onsubmit="submitMenu(event)" class="space-y-3 text-sm">
+      <input type="hidden" id="bm-id" value="">
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="text-xs text-slate-400 block mb-1">唯一键 menu_key <span class="text-rose-400">*</span></label>
+          <input id="bm-key" required placeholder="如：my_vip_center" class="w-full">
+        </div>
+        <div>
+          <label class="text-xs text-slate-400 block mb-1">父菜单 parent_id（0=一级）</label>
+          <input id="bm-pid" type="number" class="w-full" value="0">
+        </div>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="text-xs text-slate-400 block mb-1">显示文字 title <span class="text-rose-400">*</span></label>
+          <input id="bm-title" required class="w-full" placeholder="如：👑 VIP 中心">
+        </div>
+        <div>
+          <label class="text-xs text-slate-400 block mb-1">图标 Emoji</label>
+          <input id="bm-icon" class="w-full" value="🔘">
+        </div>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="text-xs text-slate-400 block mb-1">类型 <span class="text-rose-400">*</span></label>
+          <select id="bm-type" onchange="toggleMenuTypeFields()" class="w-full">
+            <option value="command">/命令 发送消息</option>
+            <option value="submenu">子菜单 目录</option>
+            <option value="inline_button">内联按钮回调</option>
+            <option value="url">跳转外链</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-xs text-slate-400 block mb-1">可见角色</label>
+          <select id="bm-role-need" class="w-full">
+            <option value="all">所有用户</option><option value="user">仅普通用户</option>
+            <option value="advertiser">仅广告主</option><option value="admin">仅管理员</option>
+          </select>
+        </div>
+      </div>
+      <div class="grid grid-cols-3 gap-3">
+        <div id="bm-cmd-box">
+          <label class="text-xs text-slate-400 block mb-1">/ 命令</label>
+          <input id="bm-cmd" class="w-full" placeholder="/vip_center">
+        </div>
+        <div id="bm-url-box">
+          <label class="text-xs text-slate-400 block mb-1">跳转 URL</label>
+          <input id="bm-url" class="w-full" placeholder="https://t.me/xxx">
+        </div>
+        <div id="bm-cb-box">
+          <label class="text-xs text-slate-400 block mb-1">callback_data</label>
+          <input id="bm-cb" class="w-full" placeholder="cb_vip_center">
+        </div>
+        <div>
+          <label class="text-xs text-slate-400 block mb-1">排序 sort_order（小=前）</label>
+          <input id="bm-sort" type="number" class="w-full" value="0">
+        </div>
+        <div>
+          <label class="text-xs text-slate-400 block mb-1">是否显示</label>
+          <select id="bm-vis" class="w-full">
+            <option value="1">✅ 展示</option>
+            <option value="0">🔕 隐藏</option>
+          </select>
+        </div>
+      </div>
+      <div>
+        <label class="text-xs text-slate-400 block mb-1">描述/备注（后台仅展示）</label>
+        <textarea id="bm-desc" rows="2" class="w-full" placeholder="仅广告主可见：VIP 会员专属菜单入口"></textarea>
+      </div>
+      <div class="flex gap-3 pt-2">
+        <button type="submit" class="btn-primary flex-1 !py-2">保存</button>
+        <button type="button" onclick="closeMenuModal()" class="flex-1 py-2 rounded-lg bg-slate-700 hover:bg-slate-600">取消</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ========== 新增/编辑热门关键词 弹窗 ========== -->
+<div id="hotwordModal" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+  <div class="card rounded-2xl w-full max-w-md p-6">
+    <div class="flex items-center justify-between mb-4">
+      <h3 id="hw-modal-title" class="font-bold text-lg">➕ 新增热门关键词</h3>
+      <button onclick="closeHotwordModal()" class="text-slate-400 hover:text-white text-xl">✕</button>
+    </div>
+    <form onsubmit="submitHotword(event)" class="space-y-3 text-sm">
+      <input type="hidden" id="hw-edit-id" value="">
+      <div>
+        <label class="text-xs text-slate-400 block mb-1">🔑 关键词 <span class="text-rose-400">*</span></label>
+        <input id="hw-keyword" type="text" required placeholder="如：比特币、AI、空投" class="w-full">
+      </div>
+      <div>
+        <label class="text-xs text-slate-400 block mb-1">📂 所属分类 <span class="text-rose-400">*</span></label>
+        <select id="hw-category" class="w-full">
+          <!-- 动态加载 -->
+        </select>
+      </div>
+      <div>
+        <label class="text-xs text-slate-400 block mb-1">🔢 排序（越小越靠前）</label>
+        <input id="hw-order" type="number" value="0" class="w-full">
+      </div>
+      <div class="flex gap-2 pt-3 border-t border-slate-700">
+        <button type="button" onclick="closeHotwordModal()" class="flex-1 py-2 rounded-lg bg-slate-700 hover:bg-slate-600">取消</button>
+        <button type="submit" class="flex-1 py-2 rounded-lg btn-primary text-white font-semibold">💾 保存</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ========== 后台：编辑广告 弹窗 ========== -->
+<div id="adminAdEditModal" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+  <div class="card rounded-2xl w-full max-w-2xl p-6 max-h-[90vh] overflow-y-auto">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="font-bold text-lg">✏️ 编辑广告计划 #<span id="aedit-id">0</span></h3>
+      <button onclick="hideModal('adminAdEditModal')" class="text-slate-400 hover:text-white text-xl">✕</button>
+    </div>
+    <div class="grid grid-cols-2 gap-3 text-sm">
+      <div class="col-span-2">
+        <label class="text-xs text-slate-400 block mb-1">🔑 搜索关键词</label>
+        <input id="aedit-keyword" type="text" class="w-full" placeholder="用户搜什么时匹配此广告">
+      </div>
+      <div class="col-span-2">
+        <label class="text-xs text-slate-400 block mb-1">📌 广告标题</label>
+        <input id="aedit-title" type="text" class="w-full" placeholder="一行吸引用户点击的标题">
+      </div>
+      <div class="col-span-2">
+        <label class="text-xs text-slate-400 block mb-1">📝 广告描述</label>
+        <textarea id="aedit-description" rows="2" class="w-full" placeholder="两行短描述"></textarea>
+      </div>
+      <div>
+        <label class="text-xs text-slate-400 block mb-1">🔗 跳转链接</label>
+        <input id="aedit-target_url" type="text" class="w-full" placeholder="https://t.me/...">
+      </div>
+      <div>
+        <label class="text-xs text-slate-400 block mb-1">📣 频道/群组</label>
+        <input id="aedit-target_channel" type="text" class="w-full" placeholder="@username">
+      </div>
+      <div>
+        <label class="text-xs text-slate-400 block mb-1">📂 分类</label>
+        <select id="aedit-category" class="w-full">
+          <option>推广</option><option>投资</option><option>工具</option><option>教程</option><option>服务</option><option>其他</option>
+        </select>
+      </div>
+      <div>
+        <label class="text-xs text-slate-400 block mb-1">👥 成员数量</label>
+        <input id="aedit-member_count" type="number" class="w-full" value="10000">
+      </div>
+      <div>
+        <label class="text-xs text-slate-400 block mb-1">💸 计费类型</label>
+        <select id="aedit-billing_type" class="w-full">
+          <option value="cpc">CPC 按点击</option>
+          <option value="cpm">CPM 按千次曝光</option>
+        </select>
+      </div>
+      <div>
+        <label class="text-xs text-slate-400 block mb-1">🎯 CPC 单价($)</label>
+        <input id="aedit-cpc_price" type="number" step="0.01" class="w-full" value="0.05">
+      </div>
+      <div>
+        <label class="text-xs text-slate-400 block mb-1">🎯 CPM 单价($)</label>
+        <input id="aedit-cpm_price" type="number" step="0.01" class="w-full" value="1">
+      </div>
+      <div>
+        <label class="text-xs text-slate-400 block mb-1">📊 日预算($)</label>
+        <input id="aedit-daily_budget" type="number" step="5" class="w-full" value="10">
+      </div>
+      <div>
+        <label class="text-xs text-slate-400 block mb-1">🔢 排序（越小越前）</label>
+        <input id="aedit-display_order" type="number" class="w-full" value="0">
+      </div>
+      <div>
+        <label class="text-xs text-slate-400 block mb-1">🚦 状态</label>
+        <select id="aedit-status" class="w-full">
+          <option value="active">✅ 投放中</option>
+          <option value="paused">⏸ 已暂停</option>
+          <option value="pending">🕓 待开启</option>
+          <option value="ended">🏁 已结束</option>
+        </select>
+      </div>
+      <div class="col-span-2 flex items-center gap-2 pt-2">
+        <input id="aedit-is_featured" type="checkbox" class="w-4 h-4">
+        <label for="aedit-is_featured" class="text-xs text-slate-300">⭐ 置顶推荐（展示在首页广告列表首位）</label>
+      </div>
+      <div class="col-span-2 flex gap-2 pt-3 border-t border-slate-700">
+        <button type="button" onclick="hideModal('adminAdEditModal')" class="flex-1 py-2 rounded-lg bg-slate-700 hover:bg-slate-600">取消</button>
+        <button type="button" onclick="adminAdEditSave()" class="flex-1 py-2 rounded-lg btn-primary text-white font-semibold">💾 保存修改</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============ 全局：登录状态 ============
+const SESSION_KEY = 'demo_admin_session';
+const ADMIN_SESSION = () => localStorage.getItem(SESSION_KEY) || '';
+
+async function checkAuth() {
+  const sid = localStorage.getItem(SESSION_KEY);
+  try {
+    const r = await fetch('/api/admin/check_auth?session_id=' + encodeURIComponent(sid || ''));
+    const d = await r.json();
+    if (d.ok) {
+      document.getElementById('curAdmin').textContent = d.username;
+      document.getElementById('adminWrap').classList.remove('hidden');
+      document.getElementById('loginWrap').classList.add('hidden');
+      refreshDashboard();
+      return true;
+    }
+  } catch (e) {}
+  document.getElementById('adminWrap').classList.add('hidden');
+  document.getElementById('loginWrap').classList.remove('hidden');
+  return false;
+}
+
+async function doLogin(e) {
+  e.preventDefault();
+  const u = document.getElementById('loginUser').value.trim();
+  const p = document.getElementById('loginPass').value;
+  const err = document.getElementById('loginErr');
+  try {
+    const r = await fetch('/api/admin/login', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({username: u, password: p})
+    });
+    const d = await r.json();
+    if (d.ok) {
+      localStorage.setItem(SESSION_KEY, d.session_id);
+      err.classList.add('hidden');
+      checkAuth();
+    } else {
+      err.textContent = '❌ ' + (d.error || '登录失败');
+      err.classList.remove('hidden');
+    }
+  } catch (e) {
+    err.textContent = '❌ 网络错误';
+    err.classList.remove('hidden');
+  }
+}
+
+async function doLogout() {
+  const sid = localStorage.getItem(SESSION_KEY);
+  await fetch('/api/admin/logout', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({session_id:sid||''})});
+  localStorage.removeItem(SESSION_KEY);
+  checkAuth();
+}
+
+// ============ 修改密码功能 ============
+function openChangePwdModal() {
+  document.getElementById('cp-username').value = document.getElementById('curAdmin').textContent || 'admin';
+  document.getElementById('cp-old-pwd').value = '';
+  document.getElementById('cp-new-pwd').value = '';
+  document.getElementById('cp-confirm-pwd').value = '';
+  document.getElementById('cp-result').classList.add('hidden');
+  document.getElementById('changePwdModal').classList.remove('hidden');
+}
+
+function closeChangePwdModal() {
+  document.getElementById('changePwdModal').classList.add('hidden');
+}
+
+async function submitChangePwd() {
+  const username = document.getElementById('cp-username').value.trim();
+  const oldPwd = document.getElementById('cp-old-pwd').value;
+  const newPwd = document.getElementById('cp-new-pwd').value;
+  const confirmPwd = document.getElementById('cp-confirm-pwd').value;
+  const result = document.getElementById('cp-result');
+  const sid = localStorage.getItem(SESSION_KEY) || '';
+  
+  result.classList.remove('hidden', 'text-rose-400', 'text-emerald-400');
+  
+  if (!username || !oldPwd || !newPwd || !confirmPwd) {
+    result.textContent = '❌ 请填写所有字段';
+    result.classList.add('text-rose-400');
+    return;
+  }
+  if (newPwd.length < 6) {
+    result.textContent = '❌ 新密码至少6位';
+    result.classList.add('text-rose-400');
+    return;
+  }
+  if (newPwd !== confirmPwd) {
+    result.textContent = '❌ 两次输入的新密码不一致';
+    result.classList.add('text-rose-400');
+    return;
+  }
+  if (newPwd === oldPwd) {
+    result.textContent = '❌ 新密码不能与旧密码相同';
+    result.classList.add('text-rose-400');
+    return;
+  }
+  
+  try {
+    const r = await fetch('/api/admin/change_password', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        session_id: sid,
+        username: username,
+        old_password: oldPwd,
+        new_password: newPwd
+      })
+    });
+    const d = await r.json();
+    if (d.ok) {
+      result.textContent = '✅ ' + (d.message || '密码修改成功');
+      result.classList.add('text-emerald-400');
+      setTimeout(() => {
+        closeChangePwdModal();
+        // 退出登录，让用户用新密码重新登录
+        alert('密码修改成功！请用新密码重新登录。');
+        doLogout();
+      }, 1500);
+    } else {
+      result.textContent = '❌ ' + (d.error || '修改失败');
+      result.classList.add('text-rose-400');
+    }
+  } catch (e) {
+    result.textContent = '❌ 网络错误';
+    result.classList.add('text-rose-400');
+  }
+}
+
+// ============ 侧边栏 tab 切换 ============
+document.querySelectorAll('#sideNav a').forEach(a => {
+  a.addEventListener('click', () => {
+    document.querySelectorAll('#sideNav a').forEach(x => {
+      x.classList.remove('active');
+      x.classList.add('text-slate-400');
+    });
+    a.classList.add('active');
+    a.classList.remove('text-slate-400');
+    const tab = a.dataset.tab;
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    document.getElementById('tab-' + tab).classList.add('active');
+    // 切换到对应tab时自动加载数据
+    if (tab === 'crawler' && typeof loadCrawler === 'function') { loadCrawler(); loadProxies(); }
+    if (tab === 'botmenu' && typeof loadMenus === 'function') loadMenus();
+    if (tab === 'settings' && typeof loadSettings === 'function') loadSettings();
+    if (tab === 'ops' && typeof loadEnvCheck === 'function') { loadEnvCheck(); loadVersions(); loadBackups(); }
+    if (tab === 'hotwords' && typeof loadHotKeywords === 'function') loadHotKeywords();
+  });
+});
+
+// ============ 全局数据容器 ============
+let D = null;
+let charts = {};
+
+// ============ 工具函数：adminFetch / toast ============
+async function adminFetch(url, body, method, timeoutMs=30000) {
+  const sid = localStorage.getItem(SESSION_KEY) || '';
+  if (!method) method = (body && Object.keys(body).length > 0) ? 'POST' : 'GET';
+  const opts = { method, headers: {'Content-Type':'application/json'} };
+  const controller = new AbortController();
+  const timer = setTimeout(()=> controller.abort(), timeoutMs);
+  if (method === 'GET') {
+    const params = new URLSearchParams({...(body||{}), session_id: sid});
+    url = url + (url.includes('?') ? '&' : '?') + params.toString();
+  } else {
+    opts.body = JSON.stringify({...body, session_id: sid});
+  }
+  try {
+    const r = await fetch(url, {...opts, signal: controller.signal});
+    clearTimeout(timer);
+    if (r.status === 401) { doLogout(); return {ok:false, error:'未登录'}; }
+    return await r.json();
+  } catch(e) {
+    clearTimeout(timer);
+    if (e.name === 'AbortError') return {ok:false, error:'请求超时，请检查网络或代理设置后重试'};
+    return {ok:false, error:'网络错误: ' + e.message};
+  }
+}
+function toast(msg, type='info') {
+  const colors = {success:'bg-emerald-600', error:'bg-rose-600', info:'bg-sky-600', warning:'bg-amber-600'};
+  const el = document.createElement('div');
+  el.className = 'fixed top-4 right-4 z-[100] px-4 py-2.5 rounded-lg text-white text-sm shadow-lg ' + (colors[type]||colors.info) + ' animate-fade-in';
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity 0.3s'; setTimeout(()=>el.remove(), 300); }, 2500);
+}
+function showModal(id) { const el = document.getElementById(id); if (el) el.classList.remove('hidden'); }
+function hideModal(id) { const el = document.getElementById(id); if (el) el.classList.add('hidden'); }
+
+function openBotInterface() {
+  const w = window.open('/', '_blank');
+  if (!w) {
+    toast('浏览器可能拦截了弹窗，请允许弹出窗口后重试', 'warning');
+    setTimeout(() => { window.location.href = '/'; }, 500);
+  } else {
+    toast('正在打开 Bot 界面...', 'info');
+  }
+}
+
+async function refreshDashboard() {
+  const sid = localStorage.getItem(SESSION_KEY) || '';
+  const r = await fetch('/api/dashboard?session_id=' + encodeURIComponent(sid));
+  if (r.status === 401) { doLogout(); return; }
+  D = await r.json();
+  renderOverview();
+  renderUsers();
+  renderChannels();
+  renderAds();
+  renderRecharge();
+  renderTx();
+  renderSystem();
+}
+
+// ---------- Tab0 总览 ----------
+function renderOverview() {
+  document.getElementById('st-users').textContent = D.total_users.toLocaleString();
+  document.getElementById('st-users-today').textContent = `+${D.users_today} 今日新增`;
+  document.getElementById('st-recharge').textContent = D.total_recharge.toFixed(2);
+  document.getElementById('st-recharge-count').textContent = `共 ${D.recharge_count} 笔充值`;
+  document.getElementById('st-ad-cost').textContent = D.total_ad_cost.toFixed(4);
+  document.getElementById('st-ad-count').textContent = `${D.impressions} 次曝光 / ${D.clicks} 次点击`;
+  document.getElementById('st-msg').textContent = D.total_messages.toLocaleString();
+  document.getElementById('st-ch').textContent = `订阅 ${D.total_channels} 个频道`;
+
+  // 金融图表
+  if (charts.finance) charts.finance.destroy();
+  charts.finance = new Chart(document.getElementById('chartFinance'), {
+    type:'bar', data: {
+      labels: D.last7_dates,
+      datasets: [
+        {label:'充值', data:D.last7_recharge, backgroundColor:'#10b981'},
+        {label:'广告消耗', data:D.last7_ad_cost, backgroundColor:'#f59e0b'}
+      ]
+    },
+    options: chartOpts()
+  });
+  // 用户余额榜
+  if (charts.users) charts.users.destroy();
+  const topUsers = D.top_users || [];
+  charts.users = new Chart(document.getElementById('chartUsers'), {
+    type:'bar', data: {
+      labels: topUsers.map(u => (u.username||'').slice(0,14)),
+      datasets: [{label:'余额 USDT', data: topUsers.map(u=>+u.balance||0), backgroundColor:'#38bdf8'}]
+    },
+    options: chartOpts(true)
+  });
+
+  // 充值流水mini
+  document.getElementById('table-recharge-mini').innerHTML = (D.recent_recharges||[]).map(r => `
+    <tr class="border-b border-slate-800 hover:bg-slate-800/40">
+      <td class="py-2 text-slate-400">${r.created_at}</td>
+      <td>@${r.username}</td>
+      <td class="text-right font-mono text-emerald-400">+${(+r.amount_usdt||r.amount||0).toFixed(2)}</td>
+      <td class="text-center">${statusBadge(r.status)}</td>
+    </tr>`).join('');
+
+  // 广告mini
+  const topAds = [...(D.campaigns||[])].sort((a,b)=> (b.daily_spent||0)-(a.daily_spent||0)).slice(0, 10);
+  document.getElementById('table-ads-mini').innerHTML = topAds.map(a => `
+    <tr class="border-b border-slate-800 hover:bg-slate-800/40">
+      <td class="py-2">@${a.advertiser_username}</td>
+      <td><span class="badge bg-sky-900/60 text-sky-200">${a.keyword}</span></td>
+      <td class="text-right font-mono text-amber-300">${(a.daily_spent||0).toFixed(2)}/${a.daily_budget}</td>
+      <td class="text-right ${(a.ctr||0)>=0.03?'text-emerald-400':'text-slate-400'}">${((a.ctr||0)*100).toFixed(1)}%</td>
+      <td class="text-center">${adStatusBadge(a.status)}</td>
+    </tr>`).join('');
+}
+
+// ---------- Tab1 用户 ----------
+function renderUsers() {
+  const kw = (document.getElementById('userSearch')?.value || '').toLowerCase();
+  const fl = document.getElementById('userFilter')?.value || 'all';
+  let rows = [...(D.users||[])];
+  if (kw) rows = rows.filter(r => (r.username||'').toLowerCase().includes(kw) || String(r.tg_user_id||'').includes(kw));
+  if (fl !== 'all') {
+    rows = rows.filter(r => (fl==='advertiser') ? (r.is_advertiser || r.role==='advertiser') : !(r.is_advertiser || r.role==='advertiser'));
+  }
+  document.getElementById('userCountLabel').textContent = `（${rows.length} 位用户 / ${D.total_users} 总）`;
+  document.getElementById('table-users').innerHTML = rows.map(u => `
+    <tr class="border-b border-slate-800 hover:bg-slate-800/40">
+      <td class="py-2.5 px-4 text-slate-500">#${u.id}</td>
+      <td class="font-mono text-xs">${u.tg_user_id}</td>
+      <td><a href="#" class="text-sky-300 hover:underline">@${u.username||'-'}</a></td>
+      <td>${roleBadge(u.role, u.is_advertiser)}</td>
+      <td class="text-right font-mono text-yellow-300">${(+u.balance||0).toFixed(2)}</td>
+      <td class="text-right font-mono text-emerald-300">${(+u.total_recharged||0).toFixed(2)}</td>
+      <td class="text-right text-slate-400">${u.total_tx||0}</td>
+      <td class="text-right text-sky-300">${u.invited_count||0}</td>
+      <td class="text-xs text-slate-500">${String(u.created_at||'').slice(5,16)}</td>
+    </tr>`).join('');
+}
+
+// ---------- Tab2 频道（增删改） ----------
+function renderChannels() {
+  const list = [...(D.channels||[])].sort((a,b) => (a.sort_order||0)-(b.sort_order||0) || b.id-a.id);
+  const total = list.length;
+  const featured = list.filter(c => c.is_featured).length;
+  const msgCount = list.reduce((s,c)=>s+(+c.msg_count||0),0);
+  const memCount = list.reduce((s,c)=>s+(+c.member_count||0),0);
+  document.getElementById('ch-total').textContent = total;
+  document.getElementById('ch-featured').textContent = featured;
+  document.getElementById('ch-msg').textContent = msgCount.toLocaleString();
+  document.getElementById('ch-members').textContent = memCount.toLocaleString();
+
+  document.getElementById('table-channels').innerHTML = list.map(c => `
+    <tr class="border-b border-slate-800 hover:bg-slate-800/40">
+      <td class="py-2.5 px-4">
+        <input type="number" value="${c.sort_order||0}" style="width:60px;padding:2px 6px;"
+               onchange="updateChannelField(${c.id},'sort_order',this.value)">
+      </td>
+      <td>
+        <div class="font-medium">${c.title||'-'} ${c.is_featured ? '<span class="badge bg-amber-600/60 text-amber-100 ml-1">⭐置顶</span>':''}</div>
+        <div class="text-[11px] text-slate-500 mt-0.5 max-w-md truncate">${c.description||'（无简介）'}</div>
+      </td>
+      <td><span class="badge bg-slate-700 text-slate-300">${c.category||'其他'}</span></td>
+      <td class="text-xs text-sky-300">${c.username?('@'+c.username):'-'}</td>
+      <td class="text-right font-mono">${(+c.member_count||0).toLocaleString()}</td>
+      <td class="text-right font-mono text-slate-400">${(+c.msg_count||0).toLocaleString()}</td>
+      <td class="text-center">${crawlStatusBadge(c.crawl_status)}</td>
+      <td class="text-center">
+        <label class="inline-flex items-center cursor-pointer">
+          <input type="checkbox" ${c.is_featured?'checked':''} onchange="updateChannelField(${c.id},'is_featured',this.checked?1:0)" class="w-4 h-4 accent-amber-500">
+        </label>
+      </td>
+      <td class="text-center whitespace-nowrap">
+        <button onclick="editChannel(${c.id})" class="text-xs bg-sky-700/70 hover:bg-sky-600 px-2 py-1 rounded">编辑</button>
+        <button onclick="deleteChannelById(${c.id})" class="text-xs bg-rose-700/70 hover:bg-rose-600 px-2 py-1 rounded ml-1">删除</button>
+      </td>
+    </tr>`).join('');
+}
+
+// ---- 频道 CRUD ----
+function openChannelModal() {
+  const sel = document.getElementById('ch-category');
+  if (sel && D?.channels) {
+    const existingCats = [...new Set(D.channels.map((c) => c.category).filter(Boolean))];
+    sel.innerHTML = '<option value="">-- 选择分类 --</option>' + existingCats.map(c => `<option>${c}</option>`).join('') + '<option>官方推荐</option><option>加密资讯</option><option>AI技术</option><option>编程开发</option><option>DeFi</option><option>NFT</option><option>社群群组</option><option>课程推广</option><option>其他</option>';
+  }
+  document.getElementById('modalTitle').textContent = '➕ 新增推广频道';
+  ['ch-edit-id','ch-title','ch-username','ch-desc','ch-url'].forEach(id => document.getElementById(id).value='');
+  document.getElementById('ch-tgid').value='';
+  document.getElementById('ch-members').value='1000';
+  document.getElementById('ch-featured').value='1';
+  document.getElementById('ch-sort').value='10';
+  document.getElementById('ch-category').value='官方推荐';
+  document.getElementById('channelModal').classList.remove('hidden');
+}
+function closeChannelModal() { document.getElementById('channelModal').classList.add('hidden'); }
+function editChannel(id) {
+  const c = (D.channels||[]).find(x => x.id===id);
+  if (!c) return;
+  document.getElementById('modalTitle').textContent = '✏️ 编辑频道 #' + id;
+  document.getElementById('ch-edit-id').value = c.id;
+  document.getElementById('ch-title').value = c.title || '';
+  document.getElementById('ch-tgid').value = c.tg_channel_id || '';
+  document.getElementById('ch-username').value = c.username || '';
+  document.getElementById('ch-members').value = c.member_count || 0;
+  document.getElementById('ch-featured').value = c.is_featured ? '1' : '0';
+  document.getElementById('ch-sort').value = c.sort_order || 0;
+  document.getElementById('ch-category').value = c.category || '其他';
+  document.getElementById('ch-desc').value = c.description || '';
+  document.getElementById('ch-url').value = c.target_url || '';
+  document.getElementById('channelModal').classList.remove('hidden');
+}
+async function submitChannel(e) {
+  e.preventDefault();
+  const sid = localStorage.getItem(SESSION_KEY);
+  const payload = {
+    session_id: sid,
+    id: document.getElementById('ch-edit-id').value ? parseInt(document.getElementById('ch-edit-id').value) : null,
+    tg_channel_id: document.getElementById('ch-tgid').value ? parseInt(document.getElementById('ch-tgid').value) : null,
+    username: document.getElementById('ch-username').value.trim(),
+    title: document.getElementById('ch-title').value.trim(),
+    member_count: parseInt(document.getElementById('ch-members').value) || 0,
+    is_featured: parseInt(document.getElementById('ch-featured').value),
+    sort_order: parseInt(document.getElementById('ch-sort').value) || 0,
+    category: document.getElementById('ch-category').value,
+    description: document.getElementById('ch-desc').value.trim(),
+    target_url: document.getElementById('ch-url').value.trim(),
+  };
+  const r = await fetch('/api/admin/channel', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(payload)
+  });
+  const d = await r.json();
+  if (d.ok) {
+    closeChannelModal();
+    toast(payload.id ? '✅ 频道已保存' : '✅ 频道已新增', 'success');
+    refreshDashboard();
+  } else {
+    alert('保存失败：' + (d.error || '未知错误'));
+  }
+}
+async function updateChannelField(id, field, value) {
+  const sid = localStorage.getItem(SESSION_KEY);
+  const labelMap = {is_featured: '⭐推荐置顶', sort_order: '🔢排序'};
+  const label = labelMap[field] || field;
+  const toggleVal = (field==='is_featured') ? (parseInt(value)?'✅ 已置顶':'❌ 已取消置顶') : value;
+  const r = await fetch('/api/admin/channel', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({session_id: sid, id, [field]: value, _partial: true})
+  });
+  try {
+    const d = await r.json();
+    if (r.ok && d.ok) {
+      toast(`✅ ${label} 已保存 (${toggleVal})`, 'success');
+      refreshDashboard();
+    } else {
+      alert(`${label} 保存失败：` + (d.error || '未知错误'));
+      refreshDashboard();
+    }
+  } catch (e) {
+    alert(`${label} 保存出错：${e}`);
+    refreshDashboard();
+  }
+}
+async function deleteChannel(id, title) {
+  if (!confirm(`确定删除频道「${title}」(#${id})？此操作不可撤销。`)) return;
+  const sid = localStorage.getItem(SESSION_KEY);
+  // 优先使用 POST 别名（部分代理/服务器会忽略 DELETE body）
+  const r = await fetch('/api/admin/channel_delete', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({session_id: sid, id})
+  });
+  let d = null; try { d = await r.json(); } catch(e) {}
+  if (r.ok && d && d.ok) {
+    toast('🗑 频道已删除', 'success');
+    refreshDashboard();
+  } else {
+    alert('删除失败：' + ((d && d.error) || '未知错误'));
+  }
+}
+// 安全封装：根据 id 从 D.channels 查找真实 title 再删，彻底避开 onclick 内嵌的引号/中文编码坑
+function deleteChannelById(id) {
+  const c = (D.channels||[]).find(x => x.id===id);
+  const t = (c && c.title) ? String(c.title) : `#${id}`;
+  deleteChannel(id, t);
+}
+
+// ---------- Tab3 广告 ----------
+function renderAds() {
+  const list = D.campaigns_full || [];
+  document.getElementById('ad-total').textContent = list.length;
+  const spent = list.reduce((s,c)=>s+(+c.daily_spent||0),0);
+  const imps = list.reduce((s,c)=>s+(+c.impressions||0),0);
+  const clicks = list.reduce((s,c)=>s+(+c.clicks||0),0);
+  document.getElementById('ad-spent').textContent = spent.toFixed(2);
+  document.getElementById('ad-imps').textContent = imps.toLocaleString();
+  document.getElementById('ad-ctr').textContent = imps>0 ? ((clicks/imps)*100).toFixed(2)+'%' : '0%';
+  document.getElementById('table-ads-full').innerHTML = list.map(a => {
+    const toggleBtn = (a.status === 'active')
+      ? `<button onclick="adminAdStatus(${a.id},'paused')" class="px-2 py-1 rounded bg-amber-600/80 hover:bg-amber-500 text-[10px]">⏸ 暂停</button>`
+      : (a.status === 'paused'
+          ? `<button onclick="adminAdStatus(${a.id},'active')" class="px-2 py-1 rounded bg-emerald-600/80 hover:bg-emerald-500 text-[10px]">▶ 启用</button>`
+          : `<span class="text-slate-600 text-[10px]">—</span>`);
+    return `
+    <tr class="border-b border-slate-800 hover:bg-slate-800/40 text-xs">
+      <td class="py-2.5 px-4 text-slate-500 font-mono">#${a.id}</td>
+      <td>@${a.advertiser_username}</td>
+      <td><span class="badge bg-sky-900/60 text-sky-200">${a.keyword}</span></td>
+      <td class="max-w-[220px] truncate">${a.title||''}</td>
+      <td class="text-center ${a.billing_type==='cpm'?'text-purple-300':'text-amber-300'}">${a.billing_type==='cpm'?'CPM 按千次曝光':'CPC 按点击'}</td>
+      <td class="text-right font-mono">
+        <span class="text-amber-300">${(a.daily_spent||0).toFixed(2)}</span>
+        <span class="text-slate-500">/</span>
+        <span>${a.daily_budget}</span>
+      </td>
+      <td class="text-right font-mono text-slate-400">${(+a.impressions||0).toLocaleString()}</td>
+      <td class="text-right font-mono text-sky-300">${(+a.clicks||0).toLocaleString()}</td>
+      <td class="text-right ${(+a.ctr||0)>=3?'text-emerald-400':'text-slate-400'}">${a.ctr||0}%</td>
+      <td class="text-center">${adStatusBadge(a.status)}</td>
+      <td class="text-xs text-slate-500">${String(a.created_at||'').slice(5,16)}</td>
+      <td class="py-2.5 px-4">
+        <div class="flex justify-end flex-wrap gap-1.5">
+          <button onclick="adminAdEdit(${a.id})" class="px-2 py-1 rounded bg-sky-600/80 hover:bg-sky-500 text-[10px]">✏️ 编辑</button>
+          ${toggleBtn}
+          <button onclick="adminAdDelete(${a.id})" class="px-2 py-1 rounded bg-rose-600/80 hover:bg-rose-500 text-[10px]">🗑 删除</button>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+// ---------- Tab4 充值 ----------
+function renderRecharge() {
+  document.getElementById('table-recharge-full').innerHTML = (D.recharges||[]).map(r => `
+    <tr class="border-b border-slate-800 hover:bg-slate-800/40 text-xs">
+      <td class="py-2.5 px-4 font-mono text-sky-300">${r.order_no}</td>
+      <td>@${r.username}<span class="text-[10px] text-slate-500">#${r.user_id}</span></td>
+      <td class="font-mono text-[10px] text-slate-400 max-w-[160px] truncate" title="${r.address}">${r.address}</td>
+      <td class="text-right font-mono text-emerald-300">${(+r.amount||0).toFixed(2)}</td>
+      <td class="text-center">${statusBadge(r.status)}</td>
+      <td class="text-[11px] text-slate-500">${String(r.created_at||'').slice(5,16)}</td>
+      <td class="text-[11px] text-slate-500">${r.confirmed_at?String(r.confirmed_at).slice(5,16):'<span class="text-slate-600">-</span>'}</td>
+    </tr>`).join('');
+}
+
+// ---------- Tab5 流水 ----------
+function renderTx() {
+  document.getElementById('table-tx').innerHTML = (D.transactions||[]).map(t => `
+    <tr class="border-b border-slate-800 hover:bg-slate-800/40 text-xs">
+      <td class="py-2.5 px-4 text-slate-500 font-mono">#${t.id}</td>
+      <td>@${t.username||'-'}<span class="text-[10px] text-slate-500 ml-1">(${t.tg_user_id||'-'})</span></td>
+      <td class="text-center">${txTypeBadge(t.type)}</td>
+      <td class="text-right font-mono ${(+t.amount||0)>0?'text-emerald-400':'text-rose-400'}">${(+t.amount||0)>0?'+':''}${(+t.amount||0).toFixed(4)}</td>
+      <td class="text-right font-mono text-yellow-300">${(+t.balance_after||0).toFixed(2)}</td>
+      <td class="text-[11px] text-slate-400 max-w-[260px] truncate" title="${t.description||''}">${t.description||'-'}</td>
+      <td class="text-[11px] text-slate-500">${String(t.created_at||'').slice(5,16)}</td>
+    </tr>`).join('');
+}
+
+// ---------- Tab6 系统 ----------
+function renderSystem() {
+  const s = D.system || {};
+  document.getElementById('system-cards').innerHTML = [
+    ['🟢 机器人', s.bot_status, s.version],
+    ['🕷 采集器', s.crawler_status, ''],
+    ['💵 充值扫描', s.recharge_scanner, ''],
+    ['⌛ 运行时长', s.uptime, 'Python '+s.python_version],
+    ['💿 数据库', s.db_size_mb+' MB', s.db_path&&s.db_path.split('/').pop()],
+    ['💾 备份数', s.backup_count+' 份', s.backup_size_mb+' MB 总'],
+    ['📋 日志文件', s.log_count+' 份', s.log_size_mb+' MB 总'],
+    ['👛 平台总余额', s.total_platform_balance+' U', '待处理单：'+s.pending_order_count],
+  ].map(([t,v,sub]) => `
+    <div class="card rounded-xl p-4">
+      <div class="text-xs text-slate-400">${t}</div>
+      <div class="text-base font-bold mt-1">${v}</div>
+      <div class="text-[10px] text-slate-500 mt-0.5 truncate">${sub||''}</div>
+    </div>`).join('');
+
+  if (charts.newUsers) charts.newUsers.destroy();
+  charts.newUsers = new Chart(document.getElementById('chartNewUsers'), {
+    type:'line', data: {labels: D.last7_dates, datasets: [{label:'新增用户', data:D.last7_new_users, borderColor:'#818cf8', backgroundColor:'rgba(129,140,248,.15)', tension:.3, fill:true}]},
+    options: chartOpts()
+  });
+  if (charts.searches) charts.searches.destroy();
+  charts.searches = new Chart(document.getElementById('chartSearches'), {
+    type:'line', data: {labels: D.last7_dates, datasets: [{label:'搜索次数', data:D.last7_searches, borderColor:'#34d399', backgroundColor:'rgba(52,211,153,.15)', tension:.3, fill:true}]},
+    options: chartOpts()
+  });
+
+  document.getElementById('table-accounts').innerHTML = (s.accounts||[]).map(a => `
+    <tr class="border-b border-slate-800 hover:bg-slate-800/40 text-xs">
+      <td class="py-2 px-2">#${a.idx}</td>
+      <td class="font-mono">${a.phone}</td>
+      <td class="text-right">${a.channels}</td>
+      <td class="text-right text-emerald-400">${a.join_today}</td>
+      <td class="text-center">${a.status}</td>
+      <td class="text-slate-500">${a.last_active}</td>
+    </tr>`).join('');
+}
+
+// ---------- 工具函数 ----------
+function chartOpts(horizontal=false) {
+  return {
+    responsive: true,
+    plugins: { legend: { labels: { color: '#cbd5e1' } } },
+    scales: horizontal ? {
+      x: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' } },
+      y: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' } }
+    } : {
+      y: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' } },
+      x: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' } }
+    }
+  };
+}
+function statusBadge(s) {
+  return s==='confirmed'
+    ? '<span class="badge bg-emerald-700/60 text-emerald-200">✓ 已确认</span>'
+    : '<span class="badge bg-amber-700/60 text-amber-200">⏳ 待确认</span>';
+}
+function adStatusBadge(s) {
+  return s==='active'
+    ? '<span class="badge bg-sky-700/60 text-sky-200">投放中</span>'
+    : '<span class="badge bg-slate-700/60 text-slate-300">暂停</span>';
+}
+function roleBadge(r, isAdv) {
+  if (r==='admin' || isAdv && String(r).includes('admin')) return '<span class="badge bg-rose-700/60 text-rose-200">管理员</span>';
+  if (r==='advertiser' || isAdv) return '<span class="badge bg-amber-700/60 text-amber-200">广告主</span>';
+  return '<span class="badge bg-slate-700 text-slate-300">普通用户</span>';
+}
+function crawlStatusBadge(s) {
+  if (s==='listening') return '<span class="badge bg-emerald-700/60 text-emerald-200">● 监听中</span>';
+  if (s==='pending') return '<span class="badge bg-slate-700 text-slate-300">待加入</span>';
+  if (s==='error') return '<span class="badge bg-rose-700/60 text-rose-200">错误</span>';
+  return `<span class="badge bg-slate-700 text-slate-300">${s||'-'}</span>`;
+}
+function txTypeBadge(t) {
+  const map = {
+    recharge: ['bg-emerald-700/60','充值'],
+    ad_click: ['bg-rose-700/60','广告点击'],
+    ad_impression: ['bg-amber-700/60','广告曝光'],
+    subscription: ['bg-purple-700/60','订阅扣费'],
+    invite_reward: ['bg-sky-700/60','邀请奖励'],
+  };
+  const m = map[t] || ['bg-slate-700','其他'];
+  return `<span class="badge ${m[0]} text-slate-100">${m[1]}</span>`;
+}
+
+// ============ 侧边栏：10 个模块 ============
+const ALL_SIDEBAR = [
+  ['overview','📊 总览','overview'],
+  ['users','👥 用户管理','users'],
+  ['channels','📡 频道/群组','channels'],
+  ['ads','🎯 广告管理','ads'],
+  ['hotwords','🔥 热门关键词','hotwords'],
+  ['recharges','💰 USDT 充值','recharge'],
+  ['transactions','📒 流水明细','tx'],
+  ['sysmon','⚙️ 系统监控','system'],
+  ['crawler','🤖 小号管理','crawler'],
+  ['botmenu','🧭 机器人菜单','botmenu'],
+  ['maintenance','🛠 升级维护','ops'],
+];
+function renderSidebar(active='overview') {
+  const sb = document.getElementById('sidebarList');
+  if (!sb) return;
+  sb.innerHTML = ALL_SIDEBAR.map(([k,lbl,tab]) => `
+    <a class="nav-item ${active===k?'active':''}"
+       onclick="switchTab('${tab}'); setActive('${k}'); return false;"
+       style="cursor:pointer">${lbl}</a>`).join('');
+}
+function setActive(k) {
+  document.querySelectorAll('#sidebarList .nav-item').forEach(n => n.classList.remove('active'));
+  const idx = ALL_SIDEBAR.findIndex(x=>x[0]===k);
+  if (idx>=0) document.querySelectorAll('#sidebarList .nav-item')[idx]?.classList.add('active');
+  // 额外：如果切换到小号/菜单/维护，立即拉一次数据
+  if (k==='crawler') { loadCrawlers(); loadProxies(); }
+  if (k==='botmenu') loadMenus();
+  if (k==='maintenance') { loadEnvCheck(); loadVersions(); loadBackups(); }
+  if (k==='hotwords') loadHotKeywords();
+}
+
+// ============ 广告管理：暂停/启用/删除/编辑 ============
+async function adminAdStatus(id, status) {
+  const tip = status === 'active' ? '启用' : '暂停';
+  if (!confirm(`确定${tip}广告 #${id}？`)) return;
+  try {
+    const r = await fetch('/api/admin/ad_campaign_status', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({session_id: ADMIN_SESSION(), campaign_id: Number(id), status})
+    });
+    if (!r.ok) throw new Error('HTTP '+r.status);
+    const d = await r.json();
+    if (d.ok) {
+      toast(`✅ 已${tip}广告 #${id}`, 'success');
+      await refreshDashboard();
+    } else {
+      toast('操作失败：' + (d.error||''), 'error');
+      alert('操作失败：' + (d.error||''));
+    }
+  } catch(e) {
+    toast(`${tip}失败：`+e.message, 'error');
+    alert(`${tip}失败：`+e.message);
+  }
+}
+async function adminAdDelete(id) {
+  if (!confirm(`确定删除广告 #${id}？删除后无法恢复`)) return;
+  try {
+    const r = await fetch('/api/admin/ad_campaign_delete', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({session_id: ADMIN_SESSION(), campaign_id: Number(id)})
+    });
+    if (!r.ok) throw new Error('HTTP '+r.status);
+    const d = await r.json();
+    if (d.ok) {
+      toast('🗑 已删除广告 #'+id, 'success');
+      await refreshDashboard();
+    } else {
+      toast('删除失败：' + (d.error||''), 'error');
+      alert('删除失败：' + (d.error||''));
+    }
+  } catch(e) {
+    toast('删除失败：'+e.message, 'error');
+    alert('删除失败：'+e.message);
+  }
+}
+let _ADMIN_EDIT_ID = 0;
+function adminAdEdit(id) {
+  _ADMIN_EDIT_ID = Number(id);
+  const list = D.campaigns_full || [];
+  const a = list.find(x => x.id === Number(id));
+  if (!a) {
+    toast('找不到广告 #'+id, 'error');
+    alert('找不到广告 #'+id);
+    return;
+  }
+  document.getElementById('aedit-id').textContent = id;
+  document.getElementById('aedit-keyword').value = a.keyword || '';
+  document.getElementById('aedit-title').value = a.title || '';
+  document.getElementById('aedit-description').value = a.description || '';
+  document.getElementById('aedit-target_url').value = a.target_url || '';
+  document.getElementById('aedit-target_channel').value = a.target_channel || '';
+  document.getElementById('aedit-category').value = a.category || '推广';
+  document.getElementById('aedit-member_count').value = a.member_count || 10000;
+  document.getElementById('aedit-billing_type').value = a.billing_type || 'cpc';
+  document.getElementById('aedit-cpc_price').value = a.cpc_price || 0.05;
+  document.getElementById('aedit-cpm_price').value = a.cpm_price || 1;
+  document.getElementById('aedit-daily_budget').value = a.daily_budget || 10;
+  document.getElementById('aedit-display_order').value = a.display_order || 0;
+  document.getElementById('aedit-is_featured').checked = !!a.is_featured;
+  document.getElementById('aedit-status').value = a.status || 'active';
+  showModal('adminAdEditModal');
+}
+async function adminAdEditSave() {
+  const payload = {
+    session_id: ADMIN_SESSION(),
+    campaign_id: Number(_ADMIN_EDIT_ID),
+    keyword: document.getElementById('aedit-keyword').value.trim(),
+    title: document.getElementById('aedit-title').value.trim(),
+    description: document.getElementById('aedit-description').value.trim(),
+    target_url: document.getElementById('aedit-target_url').value.trim(),
+    target_channel: document.getElementById('aedit-target_channel').value.trim(),
+    category: document.getElementById('aedit-category').value.trim(),
+    member_count: parseInt(document.getElementById('aedit-member_count').value) || 0,
+    billing_type: document.getElementById('aedit-billing_type').value,
+    cpc_price: parseFloat(document.getElementById('aedit-cpc_price').value) || 0,
+    cpm_price: parseFloat(document.getElementById('aedit-cpm_price').value) || 0,
+    daily_budget: parseFloat(document.getElementById('aedit-daily_budget').value) || 0,
+    display_order: parseInt(document.getElementById('aedit-display_order').value) || 0,
+    is_featured: document.getElementById('aedit-is_featured').checked ? 1 : 0,
+  };
+  try {
+    const r = await fetch('/api/admin/ad_campaign_update', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(payload)
+    });
+    if (!r.ok) throw new Error('HTTP '+r.status);
+    const d = await r.json();
+    if (d.ok) {
+      // 状态单独更新
+      const newStatus = document.getElementById('aedit-status').value;
+      const cur = (D.campaigns_full||[]).find(x => x.id === Number(_ADMIN_EDIT_ID));
+      if (newStatus !== (cur && cur.status)) {
+        try {
+          const sr = await fetch('/api/admin/ad_campaign_status', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({session_id: ADMIN_SESSION(), campaign_id: Number(_ADMIN_EDIT_ID), status: newStatus})
+          });
+          if (!sr.ok) throw new Error('HTTP '+sr.status);
+          await sr.json();
+        } catch(e2) { /* 忽略状态更新子错误 */ }
+      }
+      toast('✅ 广告已更新 #'+_ADMIN_EDIT_ID, 'success');
+      hideModal('adminAdEditModal');
+      await refreshDashboard();
+    } else {
+      toast('保存失败：' + (d.error||''), 'error');
+      alert('保存失败：' + (d.error||''));
+    }
+  } catch(e) {
+    toast('保存失败：'+e.message, 'error');
+    alert('保存失败：'+e.message);
+  }
+}
+
+// ============ 热门关键词管理 ============
+let HW_CATEGORIES = [];
+let HW_CATEGORY_ICONS = {'加密货币':'💰','AI人工智能':'🤖','Web3/DeFi':'🌐','NFT/元宇宙':'🎨','量化交易':'📈','空投/薅羊毛':'🎁','编程开发':'💻','科技前沿':'🚀'};
+
+async function loadHotKeywords() {
+  // 加载分类
+  const cats = await adminFetch('/api/admin/hot_keyword_categories');
+  if (cats && cats.ok) {
+    HW_CATEGORIES = cats.categories || [];
+    // 更新筛选下拉
+    const sel = document.getElementById('hw-filter-category');
+    if (sel && HW_CATEGORIES.length) {
+      sel.innerHTML = '<option value="">全部分类</option>' + HW_CATEGORIES.map(c => 
+        `<option value="${c.name}">${c.icon} ${c.name}</option>`
+      ).join('');
+    }
+  }
+  
+  // 加载关键词列表
+  const filterCat = document.getElementById('hw-filter-category')?.value || '';
+  const url = filterCat ? `/api/admin/hot_keywords?category=${encodeURIComponent(filterCat)}` : '/api/admin/hot_keywords';
+  const data = await adminFetch(url);
+  if (!data || !data.ok) return;
+  
+  const keywords = data.data || data.keywords || [];
+  
+  // 统计卡片
+  const stats = document.getElementById('hw-stats');
+  if (stats) {
+    const activeCount = keywords.filter(k => k.is_active).length;
+    const customCount = keywords.filter(k => k.is_custom).length;
+    const byCat = {};
+    keywords.forEach(k => { byCat[k.category] = (byCat[k.category] || 0) + 1; });
+    stats.innerHTML = `
+      <div class="card rounded-xl p-4"><div class="text-xs text-slate-400">📝 关键词总数</div><div class="stat-num text-2xl font-bold mt-1">${keywords.length}</div></div>
+      <div class="card rounded-xl p-4"><div class="text-xs text-slate-400">✅ 已启用</div><div class="stat-num text-2xl font-bold mt-1">${activeCount}</div></div>
+      <div class="card rounded-xl p-4"><div class="text-xs text-slate-400">✏️ 自定义</div><div class="stat-num text-2xl font-bold mt-1">${customCount}</div></div>
+      <div class="card rounded-xl p-4"><div class="text-xs text-slate-400">📂 分类数</div><div class="stat-num text-2xl font-bold mt-1">${Object.keys(byCat).length}</div></div>
+    `;
+  }
+  
+  // 按分类分组显示（同时包含无关键词的空分类）
+  const container = document.getElementById('hw-categories-container');
+  if (!container) return;
+  
+  const grouped = {};
+  keywords.forEach(k => {
+    if (!grouped[k.category]) grouped[k.category] = [];
+    grouped[k.category].push(k);
+  });
+  // 将 HW_CATEGORIES 中尚无关键词的分类也加入 grouped，确保新保存的分类立即可见
+  (HW_CATEGORIES || []).forEach(c => {
+    if (!(c.name in grouped)) grouped[c.name] = [];
+  });
+  // 按分类的 sort_order 排序（如果有 HW_CATEGORIES 的 sort_order 信息），否则按名称
+  const catOrder = {};
+  (HW_CATEGORIES || []).forEach((c, idx) => { catOrder[c.name] = (c.sort_order ?? 0) * 1e6 + idx; });
+  const sortedCats = Object.keys(grouped).sort((a, b) => {
+    const oa = (a in catOrder) ? catOrder[a] : 9e12 + a.charCodeAt(0);
+    const ob = (b in catOrder) ? catOrder[b] : 9e12 + b.charCodeAt(0);
+    if (oa !== ob) return oa - ob;
+    return a < b ? -1 : 1;
+  });
+
+  container.innerHTML = sortedCats.map(cat => {
+    const catKws = grouped[cat];
+    const catMeta = (HW_CATEGORIES || []).find(c => c.name === cat) || {};
+    const icon = catMeta.icon || HW_CATEGORY_ICONS[cat] || '🔍';
+    return `
+      <div class="card rounded-xl p-4">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="font-semibold">${icon} ${cat} <span class="text-xs text-slate-400 ml-2">(${catKws.length} 个关键词)</span>${catKws.length === 0 ? '<span class="badge bg-slate-600 text-slate-300 ml-2 text-[10px]">空分类 · 去添加关键词</span>' : ''}</h3>
+          <button onclick="openHotwordModalForCategory('${cat.replace(/'/g,"\\'")}')" class="text-[10px] bg-emerald-700/80 hover:bg-emerald-600 px-2 py-1 rounded">➕ 加关键词</button>
+        </div>
+        <div class="space-y-2">
+          ${catKws.length ? catKws.map(k => `
+            <div class="flex items-center gap-3 p-2 bg-slate-800/50 rounded-lg">
+              <div class="flex-1">
+                <span class="font-medium">${icon} ${k.keyword}</span>
+                ${k.is_custom ? '<span class="badge bg-violet-600/60 text-violet-200 ml-1">自定义</span>' : '<span class="badge bg-slate-600 text-slate-300 ml-1">系统默认</span>'}
+              </div>
+              <div class="text-xs text-slate-400">排序: ${k.display_order || 0}</div>
+              <label class="inline-flex items-center cursor-pointer">
+                <input type="checkbox" ${k.is_active ? 'checked' : ''} onchange="toggleHotwordActive(${k.id}, this.checked)" class="w-4 h-4 accent-sky-500">
+                <span class="ml-1 text-xs">启用</span>
+              </label>
+              <button onclick="editHotword(${k.id})" class="text-xs bg-sky-700/70 hover:bg-sky-600 px-2 py-1 rounded">编辑</button>
+              ${k.is_custom ? `<button onclick="deleteHotword(${k.id}, '${k.keyword.replace(/'/g,"\\'")}')" class="text-xs bg-rose-700/70 hover:bg-rose-600 px-2 py-1 rounded">删除</button>` : '<span class="text-xs text-slate-500">🗑 不可删</span>'}
+            </div>
+          `).join('') : `<div class="text-center text-xs text-slate-500 py-4 border border-dashed border-slate-700 rounded-lg">此分类暂无关键词，点击右上角「➕ 加关键词」快速添加。</div>`}
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function openHotwordModal() {
+  document.getElementById('hw-modal-title').textContent = '➕ 新增热门关键词';
+  document.getElementById('hw-edit-id').value = '';
+  document.getElementById('hw-keyword').value = '';
+  document.getElementById('hw-order').value = '0';
+  // 动态加载分类下拉
+  refreshCategoryDropdown().then(() => {
+    document.getElementById('hotwordModal').classList.remove('hidden');
+  });
+}
+
+// 从空分类卡片的「➕ 加关键词」按钮进入，预选中目标分类
+function openHotwordModalForCategory(catName) {
+  document.getElementById('hw-modal-title').textContent = `➕ 新增热门关键词（${catName}）`;
+  document.getElementById('hw-edit-id').value = '';
+  document.getElementById('hw-keyword').value = '';
+  document.getElementById('hw-order').value = '0';
+  refreshCategoryDropdown().then(() => {
+    const sel = document.getElementById('hw-category');
+    if (sel) {
+      // 如果目标分类不存在于下拉中（极少情况），临时追加一个 option
+      if (![...sel.options].some(o => o.value === catName)) {
+        const opt = document.createElement('option');
+        opt.value = catName;
+        opt.textContent = (HW_CATEGORY_ICONS[catName] || '📌') + ' ' + catName;
+        sel.appendChild(opt);
+      }
+      sel.value = catName;
+    }
+    document.getElementById('hotwordModal').classList.remove('hidden');
+    setTimeout(() => document.getElementById('hw-keyword')?.focus(), 100);
+  });
+}
+
+async function refreshCategoryDropdown() {
+  const r = await adminFetch('/api/admin/hot_keyword_categories', {});
+  const cats = r.ok ? (r.categories || []) : [];
+  const sel = document.getElementById('hw-category');
+  if (!sel) return;
+  sel.innerHTML = cats.map(c => 
+    `<option value="${c.name}">${c.icon || '📌'} ${c.name}</option>`
+  ).join('');
+}
+
+function closeHotwordModal() {
+  document.getElementById('hotwordModal').classList.add('hidden');
+}
+
+async function editHotword(id) {
+  const data = await adminFetch('/api/admin/hot_keywords', {});
+  const kws = data?.data || data?.keywords || [];
+  const kw = kws.find(k => k.id === id);
+  if (!kw) return;
+  // 先刷新分类下拉，再设置选中值
+  await refreshCategoryDropdown();
+  document.getElementById('hw-modal-title').textContent = `✏️ 编辑关键词: ${kw.keyword}`;
+  document.getElementById('hw-edit-id').value = kw.id;
+  document.getElementById('hw-keyword').value = kw.keyword;
+  document.getElementById('hw-category').value = kw.category;
+  document.getElementById('hw-order').value = kw.display_order || 0;
+  document.getElementById('hotwordModal').classList.remove('hidden');
+}
+
+async function submitHotword(e) {
+  e.preventDefault();
+  const id = document.getElementById('hw-edit-id').value;
+  const keyword = document.getElementById('hw-keyword').value.trim();
+  const category = document.getElementById('hw-category').value;
+  const display_order = parseInt(document.getElementById('hw-order').value) || 0;
+  
+  if (!keyword) { alert('请输入关键词'); return; }
+  
+  if (id) {
+    // 更新
+    const r = await adminFetch('/api/admin/hot_keyword_update', {
+      id: parseInt(id), keyword, category, display_order
+    });
+    if (r.ok || r.success) { closeHotwordModal(); loadHotKeywords(); toast('关键词已更新', 'success'); }
+    else alert('更新失败: ' + (r.error || '未知错误'));
+  } else {
+    // 新增
+    const r = await adminFetch('/api/admin/hot_keyword_add', {
+      keyword, category, display_order
+    });
+    if (r.ok || r.success) { closeHotwordModal(); loadHotKeywords(); toast('关键词已添加', 'success'); }
+    else alert('添加失败: ' + (r.error || '未知错误'));
+  }
+}
+
+async function deleteHotword(id, keyword) {
+  if (!confirm(`确定删除关键词「${keyword}」？此操作不可撤销。`)) return;
+  const r = await adminFetch('/api/admin/hot_keyword_delete', { id });
+  if (r.ok || r.success) { loadHotKeywords(); toast('已删除', 'success'); }
+  else alert('删除失败: ' + (r.error || '未知错误'));
+}
+
+async function toggleHotwordActive(id, active) {
+  const r = await adminFetch('/api/admin/hot_keyword_update', {
+    id, is_active: active ? 1 : 0
+  });
+  if (r.ok || r.success) toast(active ? '已启用' : '已禁用', 'success');
+  else alert('操作失败');
+}
+
+// ============ 分类管理 ============
+function openCategoryManager() {
+  document.getElementById('hw-category-manager').classList.remove('hidden');
+  loadCategoryList();
+}
+
+function closeCategoryManager() {
+  document.getElementById('hw-category-manager').classList.add('hidden');
+}
+
+async function loadCategoryList() {
+  const r = await adminFetch('/api/admin/hot_keyword_categories', {});
+  if (!r.ok) return;
+  const cats = r.categories || [];
+  const list = document.getElementById('hw-category-list');
+  if (!list) return;
+  
+  list.innerHTML = cats.map(c => `
+    <div class="flex items-center gap-2 p-2 bg-slate-800/50 rounded-lg" data-cat-id="${c.id}">
+      <span class="text-lg">${c.icon || '📌'}</span>
+      <span class="font-medium flex-1">${c.name}</span>
+      <span class="text-xs text-slate-400">排序: ${c.sort_order || 0}</span>
+      <label class="inline-flex items-center cursor-pointer">
+        <input type="checkbox" ${c.is_active ? 'checked' : ''} onchange="toggleCategoryActive(${c.id}, this.checked)" class="w-4 h-4 accent-sky-500">
+        <span class="ml-1 text-xs">启用</span>
+      </label>
+      <button onclick="editCategoryRow(${c.id})" class="text-xs bg-sky-700/70 hover:bg-sky-600 px-2 py-1 rounded">编辑</button>
+      <button onclick="deleteCategory(${c.id}, '${c.name}')" class="text-xs bg-rose-700/70 hover:bg-rose-600 px-2 py-1 rounded">删除</button>
+    </div>
+  `).join('') || '<div class="text-center text-slate-500 py-4">暂无分类</div>';
+}
+
+async function addCategory() {
+  const name = document.getElementById('cat-name').value.trim();
+  const icon = document.getElementById('cat-icon').value.trim() || '📌';
+  const sort_order = parseInt(document.getElementById('cat-sort').value) || 0;
+  
+  if (!name) { alert('请输入分类名称'); return; }
+  
+  const r = await adminFetch('/api/admin/hot_keyword_category_add', {
+    name, icon, sort_order
+  });
+  
+  if (r.ok || r.success) {
+    document.getElementById('cat-name').value = '';
+    document.getElementById('cat-icon').value = '';
+    document.getElementById('cat-sort').value = '';
+    await loadCategoryList();
+    await loadHotKeywords();
+    await refreshCategoryDropdown();
+    toast('分类已添加', 'success');
+  } else {
+    alert('添加失败: ' + (r.error || '未知错误'));
+  }
+}
+
+async function editCategoryRow(id) {
+  const r = await adminFetch('/api/admin/hot_keyword_categories', {});
+  const cats = r.categories || [];
+  const cat = cats.find(c => c.id === id);
+  if (!cat) return;
+  
+  const name = prompt('分类名称:', cat.name);
+  if (name === null) return;
+  const icon = prompt('图标 Emoji:', cat.icon || '📌') || '📌';
+  const sortStr = prompt('排序 (数字越小越靠前):', cat.sort_order || 0);
+  const sort_order = parseInt(sortStr) || 0;
+  
+  const u = await adminFetch('/api/admin/hot_keyword_category_update', {
+    id, name: name.trim(), icon: icon.trim(), sort_order
+  });
+  
+  if (u.ok || u.success) {
+    await loadCategoryList();
+    await loadHotKeywords();
+    await refreshCategoryDropdown();
+    toast('分类已更新', 'success');
+  } else {
+    alert('更新失败: ' + (u.error || '未知错误'));
+  }
+}
+
+async function deleteCategory(id, name) {
+  if (!confirm(`确定删除分类「${name}」？该分类下的所有关键词也将被禁用。`)) return;
+  const r = await adminFetch('/api/admin/hot_keyword_category_delete', { id });
+  if (r.ok || r.success) {
+    await loadCategoryList();
+    await loadHotKeywords();
+    await refreshCategoryDropdown();
+    toast('分类已删除', 'success');
+  } else {
+    alert('删除失败: ' + (r.error || '未知错误'));
+  }
+}
+
+async function toggleCategoryActive(id, active) {
+  const r = await adminFetch('/api/admin/hot_keyword_category_update', {
+    id, is_active: active ? 1 : 0
+  });
+  if (r.ok || r.success) toast(active ? '已启用' : '已禁用', 'success');
+  else alert('操作失败');
+}
+
+// ============ 小号管理 ============
+function accStatusBadge(s) {
+  const map = {
+    active: ['bg-emerald-700/60 text-emerald-200','在线 ✅'],
+    limited:['bg-amber-700/60 text-amber-200','限流 ⚠️'],
+    banned: ['bg-rose-700/60 text-rose-200','封禁 🚫'],
+    need_verify:['bg-sky-700/60 text-sky-200','需验证 🔐'],
+    offline:['bg-slate-700 text-slate-300','离线 ⚫'],
+  };
+  const m = map[s] || ['bg-slate-700 text-slate-300', s||'-'];
+  return `<span class="badge ${m[0]}">${m[1]}</span>`;
+}
+function accHealthBar(h) {
+  let cls = 'bg-emerald-500';
+  if (h<60) cls='bg-rose-500'; else if (h<80) cls='bg-amber-500';
+  return `<div class="flex items-center gap-2 text-xs">
+    <div class="flex-1 h-2 rounded-full bg-slate-700 overflow-hidden">
+      <div class="${cls} h-full rounded-full" style="width:${h}%"></div>
+    </div>
+    <span class="w-10 text-right text-slate-300 font-mono">${h}</span>
+  </div>`;
+}
+function proxyModeBadge(m){
+  if (m==='custom') return '<span class="badge bg-indigo-700/60 text-indigo-200">独立代理</span>';
+  if (m==='system') return '<span class="badge bg-slate-700 text-slate-300">跟随系统</span>';
+  return '<span class="badge bg-slate-700 text-slate-300">直连</span>';
+}
+async function loadCrawlers() {
+  const d = await adminFetch('/api/admin/crawler_accounts');
+  if (!d.ok) return;
+  const body = document.getElementById('table-crawler');
+  if (!body) return;
+  body.innerHTML = (d.accounts || []).map(a => `
+    <tr>
+      <td class="font-mono">${a.id}</td>
+      <td>
+        <div class="font-semibold">${a.phone||'—'}</div>
+        <div class="text-xs text-slate-400">${a.tg_username||'—'} · API ID ${a.api_id||'—'}</div>
+      </td>
+      <td>${accStatusBadge(a.status)}</td>
+      <td>${accHealthBar(a.health_score||0)}</td>
+      <td>${proxyModeBadge(a.proxy_mode)}
+        ${a.proxy_host?`<div class="text-xs text-slate-400 font-mono mt-1">${a.proxy_protocol||''}://${a.proxy_host}:${a.proxy_port||''}</div>`:''}
+      </td>
+      <td class="font-mono text-xs text-slate-300">
+        <div>加群 ${a.join_today}/${a.join_limit||0}</div>
+        <div>搜索 ${a.search_today}/${a.search_limit||0}</div>
+        <div>消息 ${a.msg_today}/${a.msg_limit||0}</div>
+        ${a.flood_wait_seconds>0?`<div class="text-rose-400">等待 ${a.flood_wait_seconds}s</div>`:''}
+      </td>
+      <td class="text-xs text-slate-300">${a.last_checked_at||'—'}</td>
+      <td class="text-right">
+        <button onclick="checkOneCrawler(${a.id})" class="btn-ghost !py-1 !px-2 text-xs" title="健康检测">🩺</button>
+        <button onclick="testProxyFor(${a.id})" class="btn-ghost !py-1 !px-2 text-xs" title="检测代理IP">🌐</button>
+        <button onclick='editCrawler(${JSON.stringify(a).replaceAll("'","&#39;")})' class="btn-ghost !py-1 !px-2 text-xs">✏️</button>
+        <button onclick="deleteCrawler(${a.id})" class="btn-ghost !py-1 !px-2 text-xs text-rose-300">🗑</button>
+      </td>
+    </tr>
+  `).join('');
+}
+function openCrawlerModal(isEdit=false, a=null){
+  // 重置所有字段
+  document.getElementById('ca-edit-id').value = isEdit ? a.id : '';
+  document.getElementById('ca-verified').value = 'false';
+  document.getElementById('ca-tg-uid').value = '';
+  document.getElementById('ca-tg-uname').value = '';
+  document.getElementById('ca-session-file').value = '';
+  document.getElementById('ca-phone-code-hash').value = '';
+  document.getElementById('crawlerModalTitle').textContent = isEdit?'✏️ 编辑小号':'➕ 新增小号';
+  document.getElementById('ca-phone').value = a?.phone||'';
+  document.getElementById('ca-tguname').value = a?.tg_username||'';
+  document.getElementById('ca-api-id').value = a?.api_id||'';
+  document.getElementById('ca-api-hash').value = a?.api_hash||'';
+  document.getElementById('ca-sess').value = a?.session_file||'';
+  document.getElementById('ca-status-sel').value = a?.status||'active';
+  document.getElementById('ca-pmode').value = a?.proxy_mode||'system';
+  document.getElementById('ca-pproto').value = a?.proxy_protocol||'http';
+  document.getElementById('ca-phost').value = a?.proxy_host||'';
+  document.getElementById('ca-pport').value = a?.proxy_port||'';
+  document.getElementById('ca-puser').value = a?.proxy_username||'';
+  document.getElementById('ca-ppwd').value = a?.proxy_password||'';
+  document.getElementById('ca-jlimit').value = a?.join_limit||50;
+  document.getElementById('ca-slimit').value = a?.search_limit||5000;
+  document.getElementById('ca-mlimit').value = a?.msg_limit||20000;
+  document.getElementById('ca-remark').value = a?.remark||'';
+  document.getElementById('ca-code').value = '';
+  document.getElementById('ca-2fa-pwd').value = '';
+  document.getElementById('ca-proxy-test-result').innerHTML = '';
+  document.getElementById('ca-send-code-result').innerHTML = '';
+  document.getElementById('ca-verify-result').innerHTML = '';
+  document.getElementById('ca-2fa-result').innerHTML = '';
+  toggleProxyFields();
+  loadProxyOptions(a?.proxy_id);
+  if (isEdit) {
+    // 编辑模式：直接显示配置步骤（步骤3），跳过验证码
+    document.getElementById('ca-stepper').style.display = 'none';
+    document.getElementById('ca-edit-status-block').classList.remove('hidden');
+    showCrawlerStep(3);
+  } else {
+    // 新增模式：从步骤1开始，自动加载默认 API 凭据
+    document.getElementById('ca-stepper').style.display = 'flex';
+    document.getElementById('ca-edit-status-block').classList.add('hidden');
+    showCrawlerStep(1);
+    loadDefaultApiCredentials();
+  }
+  document.getElementById('crawlerModal').classList.remove('hidden');
+}
+async function loadDefaultApiCredentials(){
+  // 如果已经有值则不覆盖
+  if (document.getElementById('ca-api-id').value && document.getElementById('ca-api-hash').value) return;
+  try {
+    const r = await adminFetch('/api/admin/crawler_default_api');
+    if (r.has_default) {
+      document.getElementById('ca-api-id').value = r.api_id || '';
+      document.getElementById('ca-api-hash').value = r.api_hash || '';
+      // 显示提示
+      const tip = document.createElement('div');
+      tip.className = 'bg-emerald-900/30 border border-emerald-700/50 rounded-lg p-2 text-xs text-emerald-300 mt-2';
+      tip.innerHTML = '✓ 已自动填充系统默认 API 凭据（一套凭据可供所有小号共用）';
+      const hashInput = document.getElementById('ca-api-hash');
+      hashInput.parentNode.insertBefore(tip, hashInput.nextSibling);
+      setTimeout(() => tip.remove(), 5000);
+    }
+  } catch(e) {
+    // 静默失败，用户手动填写
+  }
+}
+function closeCrawlerModal(){ document.getElementById('crawlerModal').classList.add('hidden'); }
+function newCrawler(){ openCrawlerModal(false); }
+function editCrawler(a){ openCrawlerModal(true, a); }
+// HTML 中使用单数形式 loadCrawler() 和 checkAllHealth()，这里做别名
+const loadCrawler = loadCrawlers;
+const checkAllHealth = checkAllCrawlers;
+function showCrawlerStep(step){
+  // 切换步骤面板显示
+  const panels = ['ca-step1','ca-step2','ca-step2fa','ca-step3'];
+  panels.forEach(p => document.getElementById(p).classList.add('hidden'));
+  if (step===1) document.getElementById('ca-step1').classList.remove('hidden');
+  else if (step===2) document.getElementById('ca-step2').classList.remove('hidden');
+  else if (step==='2fa') document.getElementById('ca-step2fa').classList.remove('hidden');
+  else if (step===3) document.getElementById('ca-step3').classList.remove('hidden');
+  // 更新步骤指示器
+  updateStepper(step);
+}
+function updateStepper(step){
+  const dots = [1,2,3];
+  const cur = (step==='2fa') ? 2 : step;
+  dots.forEach(n => {
+    const el = document.getElementById('ca-step-indicator-'+n);
+    if (!el) return;
+    const dot = el.querySelector('.ca-step-dot');
+    const lbl = el.querySelector('span:last-child');
+    if (n < cur) {
+      dot.className = 'ca-step-dot w-6 h-6 rounded-full bg-emerald-500 text-white flex items-center justify-center font-bold';
+      lbl.className = 'text-emerald-300';
+      dot.textContent = '✓';
+    } else if (n === cur) {
+      dot.className = 'ca-step-dot w-6 h-6 rounded-full bg-sky-500 text-white flex items-center justify-center font-bold';
+      lbl.className = 'text-sky-300';
+      dot.textContent = n;
+    } else {
+      dot.className = 'ca-step-dot w-6 h-6 rounded-full bg-slate-700 text-slate-400 flex items-center justify-center font-bold';
+      lbl.className = 'text-slate-400';
+      dot.textContent = n;
+    }
+  });
+}
+function onCrawlerPhoneInput(){
+  // 手机号变化时重置验证状态
+  document.getElementById('ca-verified').value = 'false';
+}
+function toggleProxyFields(){
+  const m = document.getElementById('ca-pmode').value;
+  const toDisable = (m==='system' || m==='none');
+  for (const id of ['ca-pproto','ca-phost','ca-pport','ca-puser','ca-ppwd']) {
+    document.getElementById(id).disabled = toDisable;
+    document.getElementById(id).style.opacity = toDisable?0.4:1;
+  }
+}
+// ===== 步骤1：发送验证码 =====
+async function sendCrawlerCode(){
+  const phone = v('ca-phone');
+  const api_id = v('ca-api-id');
+  const api_hash = v('ca-api-hash');
+  if (!phone) return toast('请填写手机号','error');
+  if (!api_id || !api_hash) return toast('请填写 api_id 和 api_hash','error');
+  const btn = document.getElementById('ca-btn-send-code');
+  btn.disabled = true; btn.textContent = '⏳ 发送中...';
+  const r = await adminFetch('/api/admin/crawler_send_code', {
+    phone, api_id, api_hash,
+    proxy_mode: document.getElementById('ca-pmode').value,
+    proxy_protocol: document.getElementById('ca-pproto').value,
+    proxy_host: v('ca-phost'), proxy_port: v('ca-pport'),
+    proxy_username: v('ca-puser'), proxy_password: v('ca-ppwd'),
+  }, 'POST', 60000);
+  btn.disabled = false; btn.textContent = '📤 发送验证码';
+  const box = document.getElementById('ca-send-code-result');
+  if (r.ok){
+    document.getElementById('ca-phone-code-hash').value = r.phone_code_hash || '';
+    box.innerHTML = `<div class="text-emerald-300 bg-emerald-900/30 border border-emerald-700/50 rounded-lg p-2 mt-2">✅ ${r.message}${r.hint?'<br>💡 '+r.hint:''}</div>`;
+    document.getElementById('ca-phone-display').textContent = phone;
+    showCrawlerStep(2);
+    setTimeout(()=>document.getElementById('ca-code')?.focus(), 100);
+  } else {
+    box.innerHTML = `<div class="text-rose-300 bg-rose-900/30 border border-rose-700/50 rounded-lg p-2 mt-2">❌ ${r.error||'发送失败'}</div>`;
+  }
+}
+// ===== 步骤2：验证码登录 =====
+async function verifyCrawlerCode(){
+  const phone = v('ca-phone');
+  const code = v('ca-code');
+  if (!code) return toast('请输入验证码','error');
+  const btn = document.getElementById('ca-btn-verify');
+  btn.disabled = true; btn.textContent = '⏳ 验证中...';
+  const r = await adminFetch('/api/admin/crawler_sign_in', {phone, code}, 'POST');
+  btn.disabled = false; btn.textContent = '✅ 验证登录';
+  const box = document.getElementById('ca-verify-result');
+  if (r.ok && r.need_2fa){
+    box.innerHTML = `<div class="text-amber-300">该账号需要两步验证密码</div>`;
+    showCrawlerStep('2fa');
+    setTimeout(()=>document.getElementById('ca-2fa-pwd')?.focus(), 100);
+  } else if (r.ok && r.verified){
+    onCrawlerLoginSuccess(r);
+  } else {
+    box.innerHTML = `<div class="text-rose-300 bg-rose-900/30 border border-rose-700/50 rounded-lg p-2 mt-2">❌ ${r.error||'验证失败'}${r.hint?'<br>💡 '+r.hint:''}</div>`;
+  }
+}
+// ===== 步骤2-FA：两步验证密码 =====
+async function verifyCrawler2FA(){
+  const phone = v('ca-phone');
+  const password = document.getElementById('ca-2fa-pwd').value;
+  if (!password) return toast('请输入两步验证密码','error');
+  const btn = document.getElementById('ca-btn-2fa');
+  btn.disabled = true; btn.textContent = '⏳ 验证中...';
+  const r = await adminFetch('/api/admin/crawler_sign_in_password', {phone, password}, 'POST', 30000);
+  btn.disabled = false; btn.textContent = '✅ 确认密码';
+  const box = document.getElementById('ca-2fa-result');
+  if (r.ok && r.verified){
+    onCrawlerLoginSuccess(r);
+  } else {
+    box.innerHTML = `<div class="text-rose-300 bg-rose-900/30 border border-rose-700/50 rounded-lg p-2 mt-2">❌ ${r.error||'验证失败'}</div>`;
+  }
+}
+function onCrawlerLoginSuccess(r){
+  document.getElementById('ca-verified').value = 'true';
+  document.getElementById('ca-tg-uid').value = r.tg_user_id || '';
+  document.getElementById('ca-tg-uname').value = r.tg_username || '';
+  document.getElementById('ca-session-file').value = r.session_file || '';
+  // 自动填充用户名和session路径
+  if (r.tg_username && !v('ca-tguname')) document.getElementById('ca-tguname').value = r.tg_username;
+  if (r.session_file && !v('ca-sess')) document.getElementById('ca-sess').value = r.session_file;
+  document.getElementById('ca-login-info').innerHTML = `TG用户ID: <b>${r.tg_user_id||'-'}</b> | 用户名: <b>@${r.tg_username||'-'}</b><br>Session: <code class="text-xs">${r.session_file||'-'}</code>`;
+  showCrawlerStep(3);
+  toast('登录验证成功，请配置代理和配额后保存','success');
+}
+// ===== 步骤3：保存小号 =====
+async function submitCrawler(){
+  const edit_id = parseInt(document.getElementById('ca-edit-id').value || 0);
+  const verified = document.getElementById('ca-verified').value === 'true';
+  // 新增模式必须先验证
+  if (!edit_id && !verified) return toast('请先完成验证码登录','error');
+  const payload = {
+    action: edit_id ? 'edit' : 'add',
+    id: edit_id || undefined,
+    phone: v('ca-phone'), tg_username: v('ca-tguname'),
+    api_id: v('ca-api-id'), api_hash: v('ca-api-hash'),
+    session_file: v('ca-sess') || document.getElementById('ca-session-file').value,
+    tg_user_id: document.getElementById('ca-tg-uid').value || undefined,
+    status: edit_id ? document.getElementById('ca-status-sel').value : 'active',
+    proxy_mode: document.getElementById('ca-pmode').value,
+    proxy_protocol: document.getElementById('ca-pproto').value,
+    proxy_host: v('ca-phost'), proxy_port: v('ca-pport'),
+    proxy_username: v('ca-puser'), proxy_password: v('ca-ppwd'),
+    proxy_id: parseInt(document.getElementById('ca-proxy-select').value || 0) || undefined,
+    join_limit: v('ca-jlimit'), search_limit: v('ca-slimit'), msg_limit: v('ca-mlimit'),
+    remark: v('ca-remark'),
+  };
+  const r = await adminFetch('/api/admin/crawler_account_save', payload, 'POST');
+  if (r.ok) { closeCrawlerModal(); loadCrawlers(); toast(edit_id?'已更新':'已新增小号','success'); }
+  else toast(r.error||'保存失败','error');
+}
+async function deleteCrawler(id){
+  if (!confirm(`确认删除小号 #${id}？`)) return;
+  const r = await adminFetch('/api/admin/crawler_account_delete', {id}, 'POST');
+  if (r.ok){ loadCrawlers(); toast('已删除','success'); }
+  else toast(r.error||'删除失败','error');
+}
+async function checkAllCrawlers(){
+  const btn = document.getElementById('btn-check-all');
+  if (!btn) {
+    toast('⚠️ 找不到检测按钮元素', 'warning');
+  } else {
+    btn.disabled = true;
+    btn.style.opacity = '0.7';
+    btn.style.pointerEvents = 'none';
+    btn.textContent = '⏳ 检测中...';
+  }
+  toast('🔍 开始批量健康检测，请稍候...', 'info');
+  let r = null;
+  try {
+    r = await adminFetch('/api/admin/crawler_account_health', {}, 'POST', 120000);
+  } catch(e) {
+    toast('❌ 请求异常：' + e.message, 'error');
+  }
+  if (btn) {
+    btn.disabled = false;
+    btn.style.opacity = '';
+    btn.style.pointerEvents = '';
+    btn.textContent = '🩺 一键健康检测(全部)';
+  }
+  if (!r || !r.ok) {
+    toast('❌ 检测失败：' + (r?.error || '未知错误'), 'error');
+    return;
+  }
+  loadCrawlers();
+  const total = r.count || 0;
+  const ok = r.results ? r.results.filter(x => x.conclusion==='active').length : 0;
+  const bad = total - ok;
+  let summary = `🩺 完成 ${total} 个号检测：`;
+  if (total > 0) summary += ` ✅健康 ${ok} 个`;
+  if (bad > 0) summary += ` ⚠️异常 ${bad} 个`;
+  toast(summary, bad===0 ? 'success' : 'warning');
+  if (r.results && r.results.length){
+    const details = r.results.map(x => `${x.phone||x.id}: ${x.conclusion}（${x.health_score}分 ${x.latency_ms}ms）`).join('\\n');
+    // 页面内展示摘要，避免阻塞的 alert
+    const parent = document.getElementById('tab-crawler');
+    let panel = document.getElementById('health-summary-panel');
+    if (!panel && parent) {
+      panel = document.createElement('div');
+      panel.id = 'health-summary-panel';
+      panel.className = 'mb-4';
+      parent.insertBefore(panel, parent.firstChild.nextSibling.nextSibling);
+    }
+    if (panel) {
+      const statBadges = {
+        active:   ['bg-emerald-700/50 border-emerald-600 text-emerald-300',  '正常'],
+        banned:   ['bg-rose-700/50    border-rose-600    text-rose-300',    '已封'],
+        limited:  ['bg-amber-700/50   border-amber-600   text-amber-300',   '限流'],
+        need_verify:['bg-violet-700/50 border-violet-600  text-violet-300', '需验证'],
+        degraded: ['bg-orange-700/50  border-orange-600  text-orange-300',  '延迟']
+      };
+      const lines = r.results.map(x => {
+        const s = statBadges[x.conclusion] || ['bg-slate-700 border-slate-600 text-slate-300', x.conclusion];
+        return `<div class="flex items-center justify-between py-1.5 border-b border-slate-700/50 text-xs">
+          <div class="flex items-center gap-2">
+            <span class="font-mono">${x.phone||x.id}</span>
+            <span class="text-slate-500">${x.username||''}</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="px-1.5 py-0.5 rounded border text-[11px] ${s[0]}">${s[1]}</span>
+            <span class="text-slate-400">${x.health_score||'—'}分</span>
+            <span class="text-slate-500 font-mono">${x.latency_ms||'—'}ms</span>
+          </div>
+        </div>`;
+      }).join('');
+      const statCount = {};
+      r.results.forEach(x => statCount[x.conclusion] = (statCount[x.conclusion]||0)+1);
+      const badges = Object.entries(statCount).map(([k,v]) => {
+        const s = statBadges[k] || ['bg-slate-700 border-slate-600 text-slate-300', k];
+        return `<span class="px-2 py-0.5 rounded border text-[11px] ${s[0]}">${s[1]} ${v}</span>`;
+      }).join(' ');
+      panel.innerHTML = `<div class="bg-slate-800/70 border border-slate-700 rounded-xl p-3">
+        <div class="flex items-center justify-between mb-2">
+          <div class="text-sm font-semibold text-slate-200">📋 最近一次健康检测结果（${total} 个号）</div>
+          <div class="flex items-center gap-2">
+            ${badges}
+            <button onclick="document.getElementById('health-summary-panel').remove()" class="text-slate-500 hover:text-slate-300 text-xs">✕</button>
+          </div>
+        </div>
+        <div class="max-h-60 overflow-y-auto pr-1">${lines}</div>
+      </div>`;
+      setTimeout(() => panel && panel.scrollIntoView({behavior:'smooth', block:'start'}), 100);
+    } else {
+      alert('🩺 批量健康检测结果\n\n' + summary + '\n\n' + details);
+    }
+  }
+}
+async function checkOneCrawler(id){
+  toast('🔍 正在检测 #' + id + '...', 'info');
+  const r = await adminFetch('/api/admin/crawler_account_health', {id}, 'POST');
+  if (!r.ok) { toast(r.error||'检测失败','error'); return; }
+  loadCrawlers();
+  if (!r.results || !r.results.length) { toast('⚠️ 检测结果为空','warning'); return; }
+  const x = r.results[0];
+  const cmap = {active:'text-emerald-400', banned:'text-rose-400', limited:'text-amber-400', need_verify:'text-violet-400', degraded:'text-orange-400'};
+  const lbl = {active:'✅ 正常', banned:'❌ 已封禁', limited:'⚠️ TG限流中', need_verify:'🔐 需重新验证', degraded:'⏱ 延迟过高'};
+  toast(`${x.phone||'#'+id} ${lbl[x.conclusion]||x.conclusion} · ${x.health_score}分 · ${x.total_ms}ms`, x.conclusion==='active'?'success':'warning');
+  alert(`#${id} ${x.phone}\\n结论：${x.conclusion} (${lbl[x.conclusion]||''})\\n健康分：${x.health_score}\\n耗时：${x.total_ms} ms\\n\\n${x.detail||''}`);
+}
+async function testProxyFor(id){
+  const r = await adminFetch('/api/admin/crawler_account_proxy_check', {id}, 'POST');
+  if (!r.ok) return toast(r.error||'代理检测失败','error');
+  alert(`🌐 代理 IP 检测结果（ID=${id}）\\n\\n结论：${r.conclusion}\\n握手耗时：${r.handshake_ms} ms\\n出口 IP：${r.export_ip||'—'}（${r.export_geo||'—'}）\\n目标：${r.target_host}\\n错误：${r.error||'无'}`);
+}
+async function testProxyFromModal(){
+  const host = v('ca-phost'); const port = v('ca-pport'); const proto = document.getElementById('ca-pproto').value;
+  const mode = document.getElementById('ca-pmode').value;
+  const out = document.getElementById('ca-proxy-test-result');
+  if (mode!=='custom' || !host || !port){
+    out.innerHTML = '<span class="text-amber-400">⚠️ 模式选「独立代理」且填 Host/Port 后才能单独检测</span>';
+    return;
+  }
+  out.innerHTML = '<span class="text-sky-400">⏳ 检测中...</span>';
+  const r = await adminFetch('/api/admin/crawler_account_proxy_check', {
+    proxy_mode: mode, proxy_protocol: proto, proxy_host: host, proxy_port: port,
+    proxy_username: v('ca-puser'), proxy_password: v('ca-ppwd'),
+  }, 'POST');
+  if (!r.ok){ out.innerHTML = `<span class="text-rose-400">❌ ${r.error}</span>`; return; }
+  const color = r.ok ? 'emerald' : 'rose';
+  out.innerHTML = `<span class="text-${color}-400">${r.conclusion}</span>
+    · 握手 ${r.handshake_ms}ms · 出口 IP ${r.export_ip||'—'} ${r.export_geo||''}
+    ${r.error?`<div class="text-rose-400">${r.error}</div>`:''}`;
+}
+
+// ============ 代理管理 ============
+async function loadProxies(){
+  const r = await adminFetch('/api/admin/crawler_proxies');
+  const list = document.getElementById('proxy-list');
+  const empty = document.getElementById('proxy-empty');
+  if (!r.ok || !r.proxies || r.proxies.length === 0){
+    list.innerHTML = '';
+    empty.classList.remove('hidden');
+    return;
+  }
+  empty.classList.add('hidden');
+  list.innerHTML = r.proxies.map(p => `
+    <div class="bg-slate-800/50 border border-slate-700 rounded-lg p-3 text-xs">
+      <div class="flex items-center justify-between mb-2">
+        <span class="font-semibold text-slate-200">${p.name}</span>
+        <div class="flex gap-1">
+          <button onclick="editProxy(${p.id})" class="px-2 py-0.5 rounded bg-sky-600/60 hover:bg-sky-600 text-sky-200">✏️</button>
+          <button onclick="deleteProxy(${p.id})" class="px-2 py-0.5 rounded bg-rose-600/60 hover:bg-rose-600 text-rose-200">🗑</button>
+          <button onclick="testProxyById(${p.id})" class="px-2 py-0.5 rounded bg-emerald-600/60 hover:bg-emerald-600 text-emerald-200">🌐</button>
+        </div>
+      </div>
+      <div class="text-slate-400">${p.proxy_protocol||'http'}://${p.proxy_host}:${p.proxy_port}</div>
+      ${p.proxy_username?`<div class="text-slate-500 mt-1">👤 ${p.proxy_username}</div>`:''}
+      ${p.last_test_result?`<div class="mt-1 ${p.last_test_result.includes('✅') || p.last_test_result.includes('握手成功') ? 'text-emerald-400' : 'text-slate-500'}">${p.last_test_result}</div>`:''}
+      <div class="text-slate-600 mt-1">${p.last_test_at||'未检测'}</div>
+    </div>
+  `).join('');
+}
+function editProxy(pid){ switchProxyTab('manual'); openProxyModalInternal(pid); }
+function openProxyModal(pid=null){
+  // 打开弹窗时默认：编辑走手动模式；新增时如果之前停在订阅就保留
+  openProxyModalInternal(pid);
+}
+function switchProxyTab(tab){
+  const tm = document.getElementById('pm-tab-manual');
+  const ts = document.getElementById('pm-tab-sub');
+  const pm = document.getElementById('pm-manual-panel');
+  const ps = document.getElementById('pm-sub-panel');
+  const activeCls = 'flex-1 px-3 py-2 bg-sky-700 text-white';
+  const idleCls   = 'flex-1 px-3 py-2 bg-slate-800 text-slate-300 hover:bg-slate-700';
+  if (tab==='sub'){
+    ts.className = activeCls; tm.className = idleCls;
+    ps.classList.remove('hidden'); pm.classList.add('hidden');
+  } else {
+    tm.className = activeCls; ts.className = idleCls;
+    pm.classList.remove('hidden'); ps.classList.add('hidden');
+  }
+}
+let _lastParsedProxies = [];
+function _b64decodeSafe(s){
+  try {
+    // 补 = 长度
+    s = s.trim().replace(/\s+/g,'').replace(/-/g,'+').replace(/_/g,'/');
+    while (s.length % 4) s += '=';
+    return decodeURIComponent(escape(atob(s)));
+  } catch(e) { return null; }
+}
+function _parseProxyLine(line, prefix){
+  line = line.trim();
+  if (!line || line.startsWith('#')) return null;
+  // 优先 URI: proto://[user[:pass]@]host[:port]
+  let m = line.match(/^(\w+):\/\/(?:([^:@\s\/]+)(?::([^@\s\/]*))?@)?([^:\/\s#]+)(?::(\d+))?(?:[\/\?#][^\s]*)?$/);
+  if (m){
+    const proto = m[1].toLowerCase();
+    const user = m[2] || '';
+    const pass = m[3] || '';
+    const host = m[4] || '';
+    const port = parseInt(m[5]||'0') || (proto==='https'?443:(proto==='http'?80:(proto==='socks5'||proto==='socks4'?1080:0)));
+    if (!host || !port) return null;
+    const accProto = ['http','https','socks5','socks4'];
+    const finalProto = accProto.includes(proto) ? proto : (proto==='ss'?'socks5':(proto==='trojan'||proto==='vmess'||proto==='vless'?'socks5':'http'));
+    return { name: prefix+(host+':'+port), proxy_protocol: finalProto, proxy_host: host, proxy_port: port, proxy_username: user, proxy_password: pass };
+  }
+  return null;
+}
+function parseProxyListFromText(text, prefix){
+  prefix = prefix || '';
+  const out = [];
+  if (!text) return out;
+  let decoded = text;
+  if (/^[A-Za-z0-9+\-_=\/\s]+$/.test(text.trim()) && !/^(\w+):\/\//.test(text.trim())){
+    const tryDec = _b64decodeSafe(text);
+    if (tryDec && (tryDec.includes('://') || tryDec.includes('\n'))) decoded = tryDec;
+  }
+  const lines = decoded.split(/[\r\n]+/);
+  for (const ln of lines){
+    const p = _parseProxyLine(ln, prefix);
+    if (p) out.push(p);
+  }
+  return out;
+}
+async function parseSubNow(){
+  const raw = (document.getElementById('proxy-sub-url').value||'').trim();
+  const prefix = (document.getElementById('proxy-sub-prefix').value||'').trim();
+  const stat = document.getElementById('proxy-sub-stat');
+  const preview = document.getElementById('proxy-sub-preview');
+  if (!raw){
+    toast('⚠️ 请先粘贴订阅地址或订阅内容','warning'); return;
+  }
+  // 1. 如果是 URL，先请求后端拉取；否则按纯文本/base64 直接解析
+  if (/^https?:\/\//i.test(raw)){
+    stat.textContent = '⏳ 正在从订阅地址拉取...';
+    const r = await adminFetch('/api/admin/crawler_proxy_sub_fetch', { sub_url: raw }, 'POST', 30000);
+    if (!r.ok){ stat.textContent = '拉取失败'; toast('❌ '+(r.error||'拉取失败'),'error'); return; }
+    const list = parseProxyListFromText(r.content||'', prefix);
+    _lastParsedProxies = list;
+    stat.textContent = `✅ 共解析 ${list.length} 个节点`;
+    if (!list.length){ preview.classList.add('hidden'); toast('⚠️ 订阅内容为空或不支持的格式','warning'); return; }
+    _renderSubPreview(list);
+  } else {
+    const list = parseProxyListFromText(raw, prefix);
+    _lastParsedProxies = list;
+    stat.textContent = `✅ 共解析 ${list.length} 个节点`;
+    if (!list.length){ preview.classList.add('hidden'); toast('⚠️ 未解析出任何节点','warning'); return; }
+    _renderSubPreview(list);
+  }
+}
+function _renderSubPreview(list){
+  const preview = document.getElementById('proxy-sub-preview');
+  preview.classList.remove('hidden');
+  preview.innerHTML = `<div class="text-xs text-slate-400 mb-1">点击「💾 保存代理」将全部入库（共 ${list.length} 个）</div>` +
+    list.slice(0,50).map(p=>`<div class="py-0.5 border-b border-slate-700/40"><span class="text-slate-300">${p.name}</span> <span class="text-slate-500">${p.proxy_protocol}://${p.proxy_host}:${p.proxy_port}</span></div>`).join('') +
+    (list.length>50 ? `<div class="pt-1 text-slate-500">…共 ${list.length} 个，仅显示前 50 个</div>` : '');
+}
+function openProxyModalInternal(pid){
+  document.getElementById('proxy-edit-id').value = pid || '';
+  document.getElementById('proxy-name').value = '';
+  document.getElementById('proxy-protocol').value = 'http';
+  document.getElementById('proxy-host').value = '';
+  document.getElementById('proxy-port').value = '';
+  document.getElementById('proxy-username').value = '';
+  document.getElementById('proxy-password').value = '';
+  document.getElementById('proxy-sub-url').value = '';
+  document.getElementById('proxy-sub-refresh').value = '360';
+  document.getElementById('proxy-sub-prefix').value = '';
+  document.getElementById('proxy-sub-stat').textContent = '未解析';
+  document.getElementById('proxy-sub-preview').classList.add('hidden');
+  document.getElementById('proxy-sub-preview').innerHTML = '';
+  document.getElementById('proxy-test-result').innerHTML = '';
+  _lastParsedProxies = [];
+  if (pid) { switchProxyTab('manual'); }
+  document.getElementById('proxyModalTitle').textContent = pid ? '✏️ 编辑代理' : '➕ 添加代理';
+  document.getElementById('proxyModal').classList.remove('hidden');
+  if (pid) loadProxyForEdit(pid);
+}
+async function loadProxyForEdit(pid){
+  const r = await adminFetch('/api/admin/crawler_proxies');
+  if (!r.ok || !r.proxies) return;
+  const p = r.proxies.find(x => x.id === pid);
+  if (!p) return;
+  document.getElementById('proxy-edit-id').value = p.id;
+  document.getElementById('proxy-name').value = p.name || '';
+  document.getElementById('proxy-protocol').value = p.proxy_protocol || 'http';
+  document.getElementById('proxy-host').value = p.proxy_host || '';
+  document.getElementById('proxy-port').value = p.proxy_port || '';
+  document.getElementById('proxy-username').value = p.proxy_username || '';
+  document.getElementById('proxy-password').value = '';
+}
+async function saveProxyAndClose(){
+  const r = await submitProxy();
+  if (r) closeProxyModal();
+}
+async function submitProxy(e){
+  if (e) e.preventDefault();
+  const sub_active = !document.getElementById('pm-sub-panel').classList.contains('hidden');
+  const edit_id = parseInt(document.getElementById('proxy-edit-id').value || 0);
+
+  // ======= 订阅模式：批量导入解析好的节点 =======
+  if (sub_active && _lastParsedProxies.length > 0){
+    toast(`📡 正在批量导入 ${_lastParsedProxies.length} 个节点...`, 'info');
+    let success = 0, failed = 0;
+    for (const p of _lastParsedProxies){
+      try {
+        const r = await adminFetch('/api/admin/crawler_proxy', p, 'POST');
+        if (r.ok) success++; else failed++;
+      } catch(e) { failed++; }
+    }
+    loadProxies();
+    loadProxyOptions();
+    if (failed===0){
+      toast(`✅ 已导入 ${success} 个节点`,'success');
+      return true;
+    } else {
+      toast(`⚠️ 成功 ${success}，失败 ${failed}`,'warning');
+      return success>0;
+    }
+  }
+
+  // ======= 手动模式 =======
+  const payload = {
+    id: edit_id || undefined,
+    name: v('proxy-name'),
+    proxy_protocol: document.getElementById('proxy-protocol').value,
+    proxy_host: v('proxy-host'),
+    proxy_port: v('proxy-port'),
+    proxy_username: v('proxy-username'),
+    proxy_password: v('proxy-password'),
+  };
+  if (!payload.name || !payload.proxy_host || !payload.proxy_port){
+    toast('⚠️ 请填写代理名称/Host/Port，或切换到「订阅节点」批量导入','warning');
+    return false;
+  }
+  const r = await adminFetch('/api/admin/crawler_proxy', payload, 'POST');
+  if (r.ok){
+    toast(edit_id?'已更新代理':'已添加代理','success');
+    loadProxies();
+    return true;
+  } else {
+    toast(r.error||'保存失败','error');
+    return false;
+  }
+}
+function closeProxyModal(){
+  document.getElementById('proxyModal').classList.add('hidden');
+}
+async function deleteProxy(id){
+  if (!confirm('确认删除此代理？')) return;
+  const r = await adminFetch('/api/admin/crawler_proxy/delete', {id}, 'POST');
+  if (r.ok){ loadProxies(); toast('已删除','success'); }
+  else toast(r.error||'删除失败','error');
+}
+async function testProxyById(pid){
+  const r = await adminFetch('/api/admin/crawler_proxy/test', {id: pid}, 'POST');
+  if (!r.ok) return toast(r.error||'检测失败','error');
+  const msg = `🌐 代理检测结果（ID=${pid}）\n\n结论：${r.conclusion}\n握手耗时：${r.handshake_ms} ms\n出口 IP：${r.export_ip||'—'}（${r.export_geo||'—'}）`;
+  alert(msg);
+  loadProxies();
+}
+function testProxyFromModal(){
+  const host = v('proxy-host'); const port = v('proxy-port'); const proto = document.getElementById('proxy-protocol').value;
+  const out = document.getElementById('proxy-test-result');
+  if (!host || !port){
+    out.innerHTML = '<span class="text-amber-400">⚠️ 请先填写 Host 和 Port</span>';
+    return;
+  }
+  out.innerHTML = '<span class="text-sky-400">⏳ 检测中...</span>';
+  adminFetch('/api/admin/crawler_proxy/test', {
+    proxy_protocol: proto, proxy_host: host, proxy_port: port,
+    proxy_username: v('proxy-username'), proxy_password: v('proxy-password'),
+  }, 'POST').then(r => {
+    if (!r.ok){ out.innerHTML = `<span class="text-rose-400">❌ ${r.error}</span>`; return; }
+    out.innerHTML = `<span class="text-emerald-400">${r.conclusion}</span> · 握手 ${r.handshake_ms}ms · 出口 ${r.export_ip||'—'}`;
+  });
+}
+async function loadProxyOptions(selectedId){
+  const r = await adminFetch('/api/admin/crawler_proxies');
+  const sel = document.getElementById('ca-proxy-select');
+  if (!sel) return;
+  const current = sel.value;
+  sel.innerHTML = '<option value="">— 不选择（手动配置）—</option>';
+  if (r.ok && r.proxies){
+    r.proxies.forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p.id;
+      opt.textContent = `${p.name} (${p.proxy_protocol||'http'}://${p.proxy_host}:${p.proxy_port})`;
+      sel.appendChild(opt);
+    });
+  }
+  if (selectedId) sel.value = String(selectedId);
+  else if (current) sel.value = current;
+}
+function onProxySelectChange(){
+  const sel = document.getElementById('ca-proxy-select');
+  const pid = parseInt(sel.value || 0);
+  if (!pid){
+    document.getElementById('ca-pmode').value = 'system';
+    toggleProxyFields();
+    return;
+  }
+  document.getElementById('ca-pmode').value = 'custom';
+  toggleProxyFields();
+  adminFetch('/api/admin/crawler_proxies').then(r => {
+    if (!r.ok || !r.proxies) return;
+    const p = r.proxies.find(x => x.id === pid);
+    if (!p) return;
+    document.getElementById('ca-pproto').value = p.proxy_protocol || 'http';
+    document.getElementById('ca-phost').value = p.proxy_host || '';
+    document.getElementById('ca-pport').value = p.proxy_port || '';
+    document.getElementById('ca-puser').value = p.proxy_username || '';
+    document.getElementById('ca-ppwd').value = '';
+  });
+}
+
+// ============ 机器人菜单（设置 + 实时预览）============
+function menuTypeBadge(t){
+  const m = {command:['bg-sky-700/60 text-sky-200','/命令'], submenu:['bg-violet-700/60 text-violet-200','子菜单'],
+    inline_button:['bg-amber-700/60 text-amber-200','内联按钮'], url:['bg-teal-700/60 text-teal-200','URL']};
+  const x = m[t]||['bg-slate-700 text-slate-300',t||'-'];
+  return `<span class="badge ${x[0]}">${x[1]}</span>`;
+}
+async function loadMenus(){
+  const d = await adminFetch('/api/admin/bot_menus');
+  if (!d.ok) return;
+  const all = d.menus || [];
+  // 表格：按 parent_id 分组，按 sort_order
+  document.getElementById('ops-menu-body').innerHTML = all.map(m => `
+    <tr>
+      <td class="font-mono">${m.id}</td>
+      <td>
+        <div class="font-semibold">${m.icon||''} ${m.title}</div>
+        <div class="text-xs text-slate-400">parent_id=${m.parent_id} · key=${m.menu_key} · 角色:${m.role_needed||'all'} · 顺序:${m.sort_order}</div>
+      </td>
+      <td>${menuTypeBadge(m.type)}</td>
+      <td class="font-mono text-xs text-slate-300">
+        ${m.cmd?`<div>${m.cmd}</div>`:''}
+        ${m.url?`<div class="text-teal-300">${m.url}</div>`:''}
+        ${m.callback_data?`<div class="text-amber-300">cb:${m.callback_data}</div>`:''}
+      </td>
+      <td>${m.is_visible?'<span class="text-emerald-400">✅</span>':'<span class="text-slate-500">🔕</span>'}</td>
+      <td class="text-xs text-slate-300">${m.updated_at||'—'}</td>
+      <td class="text-right">
+        <button onclick='editMenu(${JSON.stringify(m).replaceAll("'","&#39;")})' class="btn-ghost !py-1 !px-2 text-xs">✏️</button>
+        <button onclick="deleteMenu(${m.id})" class="btn-ghost !py-1 !px-2 text-xs text-rose-300">🗑</button>
+      </td>
+    </tr>
+  `).join('');
+  // 预览：按 parent_id 分组
+  renderMenuPreview(all);
+}
+function renderMenuPreview(all){
+  const byParent = {};
+  for (const m of all) (byParent[m.parent_id||0] = byParent[m.parent_id||0] || []).push(m);
+  for (const k in byParent) byParent[k].sort((a,b)=>(a.sort_order||0)-(b.sort_order||0));
+  const roleSel = document.getElementById('bm-preview-role');
+  const role = roleSel?.value || 'all';
+  const showAdmin = document.getElementById('bm-show-admin')?.checked;
+  const visible = (m) => m.is_visible && (
+    (m.role_needed||'all')==='all' || (m.role_needed===role) || (showAdmin && m.role_needed==='admin')
+  );
+  // 底部键盘：取 parent_id=0 且 type=command/submenu
+  const kbRoot = (byParent[0]||[]).filter(visible).filter(x=>x.type==='command'||x.type==='submenu');
+  const kbrd = document.getElementById('bm-preview-keyboard');
+  // TG 键盘 3 列一组
+  const cols = 2;
+  let html = '';
+  for (let i=0;i<kbRoot.length;i+=cols){
+    const row = kbRoot.slice(i, i+cols);
+    html += `<div class="grid gap-1 mb-1" style="grid-template-columns:repeat(${cols},1fr)">
+      ${row.map(m=>`
+        <button class="py-2 text-sm rounded border border-slate-600 bg-slate-700 hover:bg-slate-600 text-white"
+                onclick="previewClickMenu(${m.id}, ${JSON.stringify((m.type==='submenu'?(byParent[m.id]||[]).map(x=>x.id):[]))})">
+          ${m.icon||''} ${m.title}
+        </button>`).join('')}
+    </div>`;
+  }
+  if (kbRoot.length===0) html = '<div class="text-xs text-slate-500 text-center py-4">暂无一级菜单（去设置里添加 /命令 / 子菜单）</div>';
+  kbrd.innerHTML = html;
+
+  // 内联按钮：取 parent_id=0 且 type=内联按钮回调 / 跳转外链
+  const inlineRoot = (byParent[0]||[]).filter(visible).filter(x=>x.type==='inline_button'||x.type==='url');
+  const ilh = document.getElementById('bm-preview-inline');
+  // 2 列
+  let hi = '';
+  for (let i=0;i<inlineRoot.length;i+=2){
+    const row = inlineRoot.slice(i, i+2);
+    hi += `<div class="grid gap-1 mb-1" style="grid-template-columns:repeat(${row.length},1fr)">
+      ${row.map(m=>`
+        <button class="py-1.5 text-xs rounded bg-sky-600/20 border border-sky-600/50 text-sky-200 hover:bg-sky-600/30">
+          ${m.icon||''} ${m.title}
+          ${m.type==='url'?'↗':''}
+        </button>`).join('')}
+    </div>`;
+  }
+  if (inlineRoot.length===0) hi='<div class="text-xs text-slate-500 text-center py-2">暂无内联按钮（添加类型 内联按钮 / URL）</div>';
+  ilh.innerHTML = hi;
+}
+function previewClickMenu(id, subIds){
+  document.getElementById('bm-preview-log').innerHTML += `
+    <div class="text-xs mb-1"><span class="text-sky-400">[预览]</span> 点击菜单 #${id}。${subIds&&subIds.length?`展开子菜单IDs：${subIds.join(',')}`:'触发命令 / 回调'}</div>`;
+}
+function openMenuModal(isEdit=false, m=null){
+  document.getElementById('bm-id').value = isEdit ? m.id : '';
+  document.getElementById('menuModalTitle').textContent = isEdit?'✏️ 编辑菜单项':'➕ 新增菜单项';
+  document.getElementById('bm-key').value = m?.menu_key||'';
+  document.getElementById('bm-pid').value = m?.parent_id||0;
+  document.getElementById('bm-title').value = m?.title||'';
+  document.getElementById('bm-icon').value = m?.icon||'🔘';
+  document.getElementById('bm-type').value = m?.type||'command';
+  document.getElementById('bm-role-need').value = m?.role_needed||'all';
+  document.getElementById('bm-cmd').value = m?.cmd||'';
+  document.getElementById('bm-url').value = m?.url||'';
+  document.getElementById('bm-cb').value = m?.callback_data||'';
+  document.getElementById('bm-sort').value = m?.sort_order||0;
+  document.getElementById('bm-vis').value = m?.is_visible?1:0;
+  document.getElementById('bm-desc').value = m?.description||'';
+  toggleMenuTypeFields();
+  document.getElementById('menuModal').classList.remove('hidden');
+}
+function closeMenuModal(){ document.getElementById('menuModal').classList.add('hidden'); }
+function newMenu(){ openMenuModal(false); }
+function editMenu(m){ openMenuModal(true, m); }
+function toggleMenuTypeFields(){
+  const t = document.getElementById('bm-type').value;
+  for (const [id, typs] of [['bm-cmd-box',['command']], ['bm-url-box',['url']], ['bm-cb-box',['inline_button']]]) {
+    const el = document.getElementById(id);
+    if (el) { el.style.display = typs.includes(t)?'':'none'; }
+  }
+}
+async function submitMenu(e){
+  e.preventDefault();
+  const id = parseInt(document.getElementById('bm-id').value||0);
+  const payload = {
+    action: id?'edit':'add', id: id||undefined,
+    parent_id: parseInt(document.getElementById('bm-pid').value||0),
+    menu_key: v('bm-key'), title: v('bm-title'), icon: v('bm-icon'),
+    type: document.getElementById('bm-type').value,
+    cmd: v('bm-cmd'), url: v('bm-url'), callback_data: v('bm-cb'),
+    role_needed: document.getElementById('bm-role-need').value,
+    sort_order: parseInt(document.getElementById('bm-sort').value||0),
+    is_visible: parseInt(document.getElementById('bm-vis').value||1),
+    description: v('bm-desc'),
+  };
+  const r = await adminFetch('/api/admin/bot_menu_save', payload, 'POST');
+  if (r.ok) { closeMenuModal(); loadMenus(); toast(id?'菜单已更新':'菜单已新增','success'); }
+  else toast(r.error||'保存失败','error');
+}
+async function deleteMenu(id){
+  if (!confirm(`确认删除菜单项 #${id}？其下子菜单不会删除，只会保留。`)) return;
+  const r = await adminFetch('/api/admin/bot_menu_delete', {ids:[id]}, 'POST');
+  if (r.ok){ loadMenus(); toast('已删除','success'); }
+  else toast(r.error||'删除失败','error');
+}
+async function saveMenuSort(){
+  // 简单：读取一级 12 个以内按当前 sort_order 原样保存示例
+  const d = await adminFetch('/api/admin/bot_menus');
+  if (!d.ok) return;
+  const order = (d.menus||[]).filter(m=>m.parent_id===0).sort((a,b)=>(a.sort_order||0)-(b.sort_order||0)).map(m=>m.id);
+  const r = await adminFetch('/api/admin/bot_menu_sort', {order, parent_id:0}, 'POST');
+  if (r.ok) toast('排序已保存','success');
+}
+
+// ============ 系统升级/维护 Tab ============
+async function loadEnvCheck(){
+  const btn = document.getElementById('btn-env-check');
+  if (btn) {
+    btn.disabled = true;
+    btn.style.opacity = '0.7';
+    btn.style.pointerEvents = 'none';
+    btn.textContent = '⏳ 检测中...';
+  }
+  toast('🔎 正在进行系统环境检测，请稍候...', 'info');
+  const box = document.getElementById('ops-env-body');
+  const sb = document.getElementById('ops-env-summary');
+  box.innerHTML = `<tr><td colspan="4" class="text-slate-400 text-center py-3"><span class="animate-pulse">⏳ 检测中，请稍候...</span></td></tr>`;
+  let r = null;
+  try {
+    r = await adminFetch('/api/admin/ops/env_check', {}, 'GET', 60000);
+  } catch(e) {
+    toast('❌ 请求异常：' + e.message, 'error');
+  }
+  if (btn) {
+    btn.disabled = false;
+    btn.style.opacity = '';
+    btn.style.pointerEvents = '';
+    btn.textContent = '🔎 开始检测';
+  }
+  if (!r || !r.ok){
+    const err = r?.error || '检测失败';
+    toast('❌ 环境检测失败：' + err, 'error');
+    box.innerHTML = `<tr><td colspan="4" class="text-rose-400 text-center py-3">${err}</td></tr>`;
+    return;
+  }
+  const L = {ok:['bg-emerald-700/60 text-emerald-200','✅ 通过'], warn:['bg-amber-700/60 text-amber-200','⚠️ 警告'], error:['bg-rose-700/60 text-rose-200','❌ 错误']};
+  box.innerHTML = r.items.map(c => {
+    const l = L[c.level] || L.ok;
+    return `<tr>
+      <td>${c.name}</td>
+      <td><span class="badge ${l[0]}">${l[1]}</span></td>
+      <td class="text-xs">${c.detail||''}</td>
+      <td class="text-xs text-amber-300">${c.fix_hint||'—'}</td>
+    </tr>`;
+  }).join('');
+  const s = r.summary;
+  const total = s.total, pass = s.pass, warn = s.warn, err = s.error;
+  sb.innerHTML = `<div class="text-xs text-slate-300">
+    共 ${total} 项检测：<span class="text-emerald-300">通过 ${pass}</span>
+    · <span class="text-amber-300">警告 ${warn}</span>
+    · <span class="text-rose-300">错误 ${err}</span>
+    · 综合：<b>${r.overall==='pass'?'✅ 通过':(r.overall==='warning'?'⚠️ 有警告':'🔴 存在错误，需修复')}</b>
+  </div>`;
+  const level = (err>0) ? 'error' : (warn>0 ? 'warning' : 'success');
+  const lblMap = {success:'✅ 全部通过', warning:`⚠️ ${warn} 项警告`, error:`🔴 ${err} 项错误`};
+  toast(`🔎 环境检测完成：${total}项 · ${lblMap[level]}`, level==='success'?'success':'warning');
+}
+async function runRepair(){
+  if (!confirm('一键修复将：创建缺失目录、重建损坏建表、重置active小号今日配额、清理过期session、清除损坏分词缓存。确认？')) return;
+  const btn = document.getElementById('btn-repair');
+  if (btn) {
+    btn.disabled = true;
+    btn.style.opacity = '0.7';
+    btn.style.pointerEvents = 'none';
+    btn.textContent = '⏳ 修复中...';
+  }
+  toast('🔧 正在执行一键修复...', 'info');
+  let r = null;
+  try {
+    r = await adminFetch('/api/admin/ops/env_repair', {}, 'POST', 120000);
+  } catch(e) {
+    toast('❌ 请求异常：' + e.message, 'error');
+  }
+  if (btn) {
+    btn.disabled = false;
+    btn.style.opacity = '';
+    btn.style.pointerEvents = '';
+    btn.textContent = '🔧 一键修复';
+  }
+  if (!r || !r.ok) { toast('❌ 修复失败：' + (r?.error||'未知错误'), 'error'); return; }
+  loadEnvCheck();
+  toast(`🔧 一键修复完成：共 ${r.total||0} 项 · 成功 ${r.done||0} 项`, 'success');
+  // 改为页面内面板展示，避免 alert 阻塞
+  const parent = document.getElementById('tab-ops');
+  let panel = document.getElementById('repair-result-panel');
+  if (!panel && parent) {
+    panel = document.createElement('div');
+    panel.id = 'repair-result-panel';
+    panel.className = 'mb-4';
+    parent.insertBefore(panel, parent.firstChild.nextSibling.nextSibling);
+  }
+  if (panel && r.actions) {
+    const lines = r.actions.map(a => {
+      const isOk = (a.level === 'success') || (Array.isArray(a) && a[1] === 'success');
+      const text = typeof a === 'string' ? a : (a.text || (Array.isArray(a)? a[0] : JSON.stringify(a)));
+      return `<div class="text-xs py-1 border-b border-slate-700/50 ${isOk?'text-emerald-300':'text-amber-300'}">${text}</div>`;
+    }).join('');
+    panel.innerHTML = `<div class="bg-slate-800/70 border border-slate-700 rounded-xl p-3">
+      <div class="flex items-center justify-between mb-2">
+        <div class="text-sm font-semibold text-slate-200">🔧 最近一次一键修复结果（${r.done||0}/${r.total||0}）</div>
+        <button onclick="document.getElementById('repair-result-panel').remove()" class="text-slate-500 hover:text-slate-300 text-xs">✕</button>
+      </div>
+      <div class="max-h-60 overflow-y-auto pr-1">${lines}</div>
+    </div>`;
+  } else if (r && r.actions){
+    alert('一键修复结果（共 ' + r.total + ' 项，成功 ' + r.done + '）\n\n' + r.actions.map(a=> Array.isArray(a)?`[${a[1]}] ${a[0]}` : (a.text?`[${a.level}] ${a.text}`:a)).join('\n'));
+  }
+}
+async function runClearCache(){
+  const items = ['session','jieba','search','uploads','demo','log'].filter(x => document.getElementById('cache-'+x).checked);
+  if (!items.length) return toast('请至少选一项缓存','warning');
+  const btn = document.getElementById('btn-cache');
+  toast('🧹 正在清理缓存...', 'info');
+  if (btn) {
+    btn.disabled = true;
+    btn.style.opacity = '0.7';
+    btn.style.pointerEvents = 'none';
+    btn.textContent = '⏳ 清理中...';
+  }
+  const payload = items.reduce((o,k)=>(o[k]=true,o), {});
+  let r = null;
+  try {
+    r = await adminFetch('/api/admin/ops/clear_cache', payload, 'POST', 60000);
+  } catch(e) {
+    toast('❌ 请求异常：' + e.message, 'error');
+  }
+  if (btn) {
+    btn.disabled = false;
+    btn.style.opacity = '';
+    btn.style.pointerEvents = '';
+    btn.textContent = '🧹 清理选中缓存';
+  }
+  if (!r || !r.ok) { toast('❌ 清理失败：' + (r?.error||'未知错误'), 'error'); return; }
+  toast(`✅ 清理完成：释放 ${r.total_freed_mb||0} MB`, 'success');
+  document.getElementById('cache-result').innerHTML = `
+    <div class="text-emerald-300 mb-2">✅ 共释放 ${r.total_freed_mb||0} MB</div>
+    ${(r.items||[]).map(x => `<div class="text-xs mb-1"><b>${x.name}：</b>${x.detail}</div>`).join('')}`;
+}
+async function loadVersions(){
+  const r = await adminFetch('/api/admin/ops/versions');
+  if (!r.ok) return;
+  // ChangeLog 时间线
+  document.getElementById('ops-changelog').innerHTML = (r.changelog||[]).map(c=>`
+    <div class="flex gap-3 mb-3">
+      <div class="text-right font-mono text-xs w-20 text-slate-400 shrink-0">${c.when||''}</div>
+      <div class="flex-1 border-l-2 border-slate-700 pl-3">
+        <div class="font-bold"><span class="text-amber-300">${c.version}</span>
+          <span class="text-xs ml-2">${c.status||''}</span>
+          <span class="text-xs ml-2 text-slate-400">by ${c.by||''}</span>
+        </div>
+        <div class="text-sm text-slate-300">${c.changelog||''}</div>
+      </div>
+    </div>
+  `).join('') || '<div class="text-sm text-slate-500">暂无版本历史</div>';
+  // 版本列表（可回滚）
+  const vb = document.getElementById('ops-versions-body');
+  vb.innerHTML = (r.versions||[]).map(v=>`
+    <tr>
+      <td class="font-mono">${v.version}</td>
+      <td>${v.filename||''}<div class="text-xs text-slate-400">${v.size_kb||0} KB · ${v.uploaded_by} · ${v.uploaded_at}</div></td>
+      <td>
+        ${v.status==='deployed'?'<span class="badge bg-emerald-700/60 text-emerald-200">✅ 当前</span>':
+          v.status==='rolled_back'?'<span class="badge bg-slate-700 text-slate-300">↩️ 已回滚</span>':
+          v.status==='uploaded'?'<span class="badge bg-amber-700/60 text-amber-200">📤 未部署</span>':
+          '<span class="badge bg-rose-700/60 text-rose-200">❌ 失败</span>'}
+      </td>
+      <td class="text-xs text-slate-300">
+        ${v.db_backup?`DB: ${v.backup_size_kb||0} KB<div class="font-mono text-slate-500">${v.backup_file||''}</div>`:'<span class="text-slate-500">无</span>'}
+      </td>
+      <td class="text-right">
+        ${v.status!=='deployed'?`<button onclick="rollbackVersion('${v.version}')" class="btn-ghost !py-1 !px-2 text-xs">↩️ 回滚到此版本</button>`:
+          '<span class="text-xs text-slate-500">当前版本</span>'}
+      </td>
+    </tr>`).join('');
+}
+async function submitUpdate(e){
+  e.preventDefault();
+  const form = document.getElementById('upload-form');
+  const fd = new FormData(form);
+  fd.set('session_id', localStorage.getItem(SESSION_KEY));
+  const btn = document.getElementById('btn-upload');
+  btn.disabled = true; btn.textContent = '⏳ 上传+自动备份+部署...';
+  const r = await (await fetch('/api/admin/ops/upload_update', {method:'POST', body:fd})).json();
+  btn.disabled = false; btn.textContent = '🚀 上传并部署（含自动备份）';
+  if (!r.ok) return toast(r.error||'上传失败','error');
+  loadVersions();
+  alert(`部署完成 ${r.new_version}\\n\\n升级包：${r.size_kb} KB\\n自动备份 DB：${r.db_backup.created?`✅ ${r.db_backup.file} (${r.db_backup.size_kb} KB)`:'未开启'}\\n自动重启：${r.auto_restarted?'✅ 已完成':'未开启'}\\n\\n${r.note||''}`);
+}
+async function rollbackVersion(ver){
+  if (!confirm(`确定回滚到 ${ver}？\\n- 若有备份 DB，将先备份当前DB → 再恢复目标版本DB\\n- 所有状态从 deployed 改为 rolled_back\\n确认？`)) return;
+  const r = await adminFetch('/api/admin/ops/rollback', {version:ver}, 'POST');
+  if (!r.ok) return toast(r.error||'失败','error');
+  loadVersions();
+  alert(`回滚完成 → ${r.target}\\nDB 恢复：${r.db_restored?`✅ 从 ${r.db_restored_from}`:'❌ 未找到备份DB（跳过）'}\\n\\n${r.note||''}`);
+}
+
+// ============ DB 备份/恢复 ============
+let _bk_cron_template = '';
+async function loadBackups(){
+  const r = await adminFetch('/api/admin/ops/backup_list', {}, 'GET', 30000);
+  if (!r.ok) {
+    // 避免静默失败，给提示
+    const body = document.getElementById('ops-backups-body');
+    if (body) body.innerHTML = `<tr><td colspan="5" class="text-center text-rose-400 py-3">❌ 加载备份列表失败：${r.error||''}</td></tr>`;
+    return;
+  }
+  // 备份列表
+  const body = document.getElementById('ops-backups-body');
+  if (!body) return;
+  const sid = localStorage.getItem(SESSION_KEY) || '';
+  const scopeBadge = (s) => ({
+    '手动':'bg-indigo-700/60 text-indigo-200','自动定时':'bg-amber-700/60 text-amber-200',
+    '后台上传':'bg-teal-700/60 text-teal-200','版本升级':'bg-sky-700/60 text-sky-200'
+  }[s] || 'bg-slate-700 text-slate-300');
+  body.innerHTML = (r.files || []).length ? (r.files || []).map(f => `
+    <tr>
+      <td class="font-mono text-xs truncate max-w-[180px]" title="${f.name}">${f.name}</td>
+      <td><span class="badge ${scopeBadge(f.scope)}">${f.scope}</span></td>
+      <td class="font-mono">${f.size_kb} KB</td>
+      <td class="font-mono">${f.created_at}</td>
+      <td class="text-right">
+        <a class="btn-ghost !py-1 !px-2 text-xs inline-block" href="${f.download_url}&session_id=${encodeURIComponent(sid)}" target="_blank">⬇ 下载</a>
+      </td>
+    </tr>
+  `).join('') : `<tr><td colspan="5" class="text-center text-slate-500 py-3">暂无备份，点「💾 创建备份」生成你的第一个快照</td></tr>`;
+  // 宝塔定时配置
+  if (r.baota_cron) {
+    const bc = r.baota_cron;
+    _bk_cron_template = `# 任务名：${bc.name}
+# 周期表达式 (Cron)：${bc.cron_expression}
+# 说明：${bc.note}
+${bc.shell}`;
+    const el = document.getElementById('bk-cron');
+    if (el) el.textContent = _bk_cron_template;
+  }
+}
+async function createBackupNow(){
+  const note = (document.getElementById('bk-note')?.value || '').trim();
+  const btn = document.getElementById('btn-create-backup');
+  const out = document.getElementById('bk-last-result');
+  if (btn) {
+    btn.disabled = true;
+    btn.style.opacity = '0.7';
+    btn.style.pointerEvents = 'none';
+    btn.textContent = '⏳ 打包中...';
+  }
+  toast('💾 正在创建备份快照...', 'info');
+  let r = null;
+  try {
+    r = await adminFetch('/api/admin/ops/backup_create', {note}, 'POST', 120000);
+  } catch(e) {
+    toast('❌ 请求异常：' + e.message, 'error');
+  }
+  if (btn) {
+    btn.disabled = false;
+    btn.style.opacity = '';
+    btn.style.pointerEvents = '';
+    btn.textContent = '💾 创建备份（DB+菜单+小号 打包 ZIP）';
+  }
+  if (!r || !r.ok){
+    toast('❌ 备份失败：' + (r?.error||'未知错误'), 'error');
+    if (out) out.innerHTML = `<span class="text-rose-400">❌ ${r?.error||'备份失败'}</span>`;
+    return;
+  }
+  if (out) {
+    const sid = localStorage.getItem(SESSION_KEY)||'';
+    out.innerHTML = `<span class="text-emerald-300">✅ 已生成</span> ${r.name}（${r.size_kb} KB）· ${r.created_at}
+      <a class="text-sky-300 ml-2 underline" href="${r.download_url}&session_id=${encodeURIComponent(sid)}" target="_blank">立即下载</a>`;
+  }
+  toast(`✅ 备份完成：${r.size_kb||0} KB`, 'success');
+  loadBackups();
+}
+function copyCron(){
+  if (!_bk_cron_template) return toast('定时配置还没加载','warning');
+  navigator.clipboard?.writeText(_bk_cron_template).then(
+    ()=>toast('✅ 已复制到剪贴板，去宝塔粘贴','success'),
+    ()=>toast('复制失败，请手动选中复制','warning')
+  );
+}
+async function submitRestore(e){
+  e.preventDefault();
+  const form = document.getElementById('restore-form');
+  const fileInput = form?.querySelector('input[type=file]');
+  if (fileInput && !fileInput.value){
+    toast('⚠️ 请先选择要上传的备份文件','warning');
+    return;
+  }
+  const fd = new FormData(form);
+  fd.set('session_id', localStorage.getItem(SESSION_KEY));
+  const btn = form.querySelector('button[type=submit]');
+  const out = document.getElementById('bk-restore-result');
+  toast('⬆️ 正在上传备份文件...','info');
+  if (btn) {
+    btn.disabled = true;
+    btn.style.opacity = '0.7';
+    btn.style.pointerEvents = 'none';
+    btn.dataset.old = btn.textContent;
+    btn.textContent = '⏳ 上传校验中...';
+  }
+  let r = null;
+  try {
+    const resp = await fetch('/api/admin/ops/backup_restore_upload', {method:'POST', body:fd});
+    r = await resp.json();
+  } catch(e) {
+    toast('❌ 上传异常：' + e.message, 'error');
+  }
+  if (btn) {
+    btn.disabled = false;
+    btn.style.opacity = '';
+    btn.style.pointerEvents = '';
+    btn.textContent = btn.dataset.old || '⬆️ 上传并恢复';
+  }
+  if (!r || !r.ok) {
+    const msg = r?.error || '上传或校验失败';
+    toast('❌ ' + msg, 'error');
+    if (out) out.innerHTML = `<span class="text-rose-400">❌ ${msg}</span>`;
+    return;
+  }
+  toast('✅ 上传完成：' + (r.size_kb||0) + ' KB ' + (r.do_restore?'· 已恢复覆盖':'· 仅校验'), r.do_restore?'success':'warning');
+  loadBackups();
+  const mp = r.meta_preview || {};
+  if (out) out.innerHTML = `
+    <div class="text-emerald-300 mb-1">✅ 已上传（${r.size_kb} KB） · 结构校验：${r.valid?'✅ 通过':'⚠️ 未发现 .db 表'}
+    ${r.do_restore?'<span class="text-amber-300"> · 已覆盖当前 DB！</span>':''}
+    </div>
+    <div class="text-[11px] text-slate-400">
+      ${mp.note?`<div>备注：${mp.note}</div>`:''}
+      ${mp.exported_at?`<div>导出时间：${mp.exported_at}</div>`:''}
+      ${'bot_menus' in mp?`<div>菜单：${mp.bot_menus} 条 · 小号：${mp.crawler_accounts} 条 · DB ${mp.db_size_before_kb||0} KB</div>`:''}
+      ${r.detected_db?`<div>DB 文件：${r.detected_db}</div>`:''}
+      ${r.rollback_pre_before_restore?`<div class="text-amber-300">恢复前快照：${r.rollback_pre_before_restore}</div>`:''}
+      <div>${r.manual_hint||''}</div>
+    </div>`;
+}
+function v(id){ return (document.getElementById(id).value || '').trim(); }
+
+// 辅助：敏感输入框聚焦时，如果内容全是占位符圆点则清空
+function _clearSensitivePlaceholder(el) {
+  if (!el) return;
+  const raw = (el.value || '').toString();
+  if (raw.replace(/\u2022/g, '').replace(/\*/g, '').trim() === '') {
+    el.value = '';
+  }
+}
+
+// ============ 系统配置 Tab ============
+let _SETTINGS_STATE = { groups: [], env_only: {}, active_group: 0 };
+
+function _formatValueForUI(item) {
+  const v = item.current_value;
+  if (item.type === 'list_int' || item.type === 'list_str') {
+    if (Array.isArray(v)) return v.join(', ');
+    return (v || '').toString();
+  }
+  if (v === null || v === undefined) return '';
+  return v.toString();
+}
+
+function _parseValueFromUI(item, raw) {
+  raw = (raw ?? '').toString().trim();
+  if (item.sensitive && raw.replace(/•/g,'').trim() === '') {
+    // 全部都是占位符 → 用户没改，返回 undefined 表示不更新
+    return undefined;
+  }
+  if (item.type === 'list_int') {
+    if (!raw) return [];
+    return raw.split(',').map(x => x.trim()).filter(Boolean).map(Number).filter(x => Number.isFinite(x));
+  }
+  if (item.type === 'list_str') {
+    if (!raw) return [];
+    return raw.split(',').map(x => x.trim()).filter(Boolean);
+  }
+  if (item.type === 'int')   return raw === '' ? 0 : Math.floor(Number(raw));
+  if (item.type === 'float') return raw === '' ? 0.0 : Number(raw);
+  if (item.type === 'bool')  return ['1','true','yes','on'].includes(raw.toLowerCase());
+  if (item.type === 'json')  { try { return JSON.parse(raw); } catch { return raw; } }
+  return raw;
+}
+
+function _renderGroupTabs() {
+  const el = document.getElementById('settings-group-tabs');
+  el.innerHTML = _SETTINGS_STATE.groups.map((g, i) => `
+    <button type="button" onclick="_selectGroup(${i})" data-settings-group="${i}"
+      class="px-4 py-2 rounded-lg text-sm border transition flex items-center gap-2
+      ${i===_SETTINGS_STATE.active_group ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-800/50 border-slate-700 text-slate-300 hover:bg-slate-800'}">
+      <span>${g.icon}</span><span>${g.group_name}</span>
+      <span class="ml-1 text-[10px] opacity-70">${g.items.length}</span>
+    </button>`).join('');
+}
+
+function _selectGroup(i) {
+  _SETTINGS_STATE.active_group = i;
+  _renderGroupTabs();
+  _renderForm();
+}
+
+function _renderForm() {
+  const wrap = document.getElementById('settings-form-area');
+  const g = _SETTINGS_STATE.groups[_SETTINGS_STATE.active_group];
+  if (!g) { wrap.innerHTML = '<div class="text-center text-slate-400 text-sm py-10">加载中...</div>'; return; }
+  wrap.innerHTML = `
+    <div class="mb-4 flex items-center justify-between">
+      <div>
+        <div class="font-semibold text-slate-100">${g.icon} ${g.group_name}</div>
+        <div class="text-xs text-slate-400 mt-1">共 ${g.items.length} 项 · 填完后点右下角「保存全部并生效」</div>
+      </div>
+    </div>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+      ${g.items.map((it, idx) => _renderField(it, idx)).join('')}
+    </div>`;
+}
+
+function _renderField(it, idx) {
+  const val = _formatValueForUI(it);
+  const isEmpty = it.raw_is_empty;
+  const sensitive = !!it.sensitive;
+  const forbidden = !!it.forbidden;
+  const sourceBadge = it.source === 'env'
+    ? '<span class="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-emerald-700/40 text-emerald-200">.env</span>'
+    : (it.source === 'default'
+        ? '<span class="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-slate-700 text-slate-300">默认值</span>'
+        : '<span class="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-sky-700/40 text-sky-200">DB 覆盖</span>');
+  if (forbidden) {
+    return `
+      <div class="col-span-full md:col-span-2 p-4 rounded-xl border border-amber-600/40 bg-amber-900/10">
+        <div class="flex items-start gap-3">
+          <div class="text-2xl">🔐</div>
+          <div class="flex-1">
+            <div class="font-semibold text-amber-200">${it.label} <span class="text-xs text-amber-400/80">[key: ${it.key}]</span></div>
+            <div class="text-xs text-amber-200/80 mt-1">${it.hint || '安全硬约束：此配置只能在服务器 .env 文件中手写设置，绝对禁止存入数据库、绝对禁止在任何页面回显。'}</div>
+            <div class="text-xs text-slate-300 mt-2 bg-slate-800/60 rounded-lg p-2 font-mono break-all">
+              当前已配置：<b>${isEmpty ? '<span class="text-rose-400">❌ 未设置</span>' : '<span class="text-emerald-400">✅ 已配置（后台不回显）</span>'}</b>
+            </div>
+          </div>
+        </div>
+      </div>`;
+  }
+  const placeholder = it.placeholder || '';
+  const hint = it.hint ? `<div class="text-[11px] text-slate-500 mt-1">${it.hint}</div>` : '';
+  const emptyHint = isEmpty && !sensitive ? `<div class="text-[11px] text-amber-400/80 mt-1">⚠️ 未配置，建议填写</div>` : '';
+  let input;
+  if (it.type === 'bool') {
+    const chk = (val || '').toString().toLowerCase() in {'1':'','true':'','yes':'','on':''} ? 'checked' : '';
+    input = `<label class="flex items-center gap-2"><input id="s-f-${idx}" type="checkbox" class="!w-auto" ${chk}> <span class="text-xs text-slate-400">${val?'已启用':'已关闭'}</span></label>`;
+  } else if (it.type === 'int' || it.type === 'float') {
+    input = `<input id="s-f-${idx}" type="number" step="${it.type==='float'?'any':'1'}" value="${val}" placeholder="${placeholder}" class="w-full">`;
+  } else if (it.type === 'json' || it.textarea) {
+    const rows = it.textarea ? '4' : '3';
+    input = `<textarea id="s-f-${idx}" rows="${rows}" class="w-full font-mono text-xs" placeholder="${placeholder}" ${sensitive?'autocomplete="new-password"':''}>${val}</textarea>`;
+  } else {
+    input = `<input id="s-f-${idx}" type="${sensitive?'password':'text'}" ${sensitive?'autocomplete="new-password"':''} value="${val}" placeholder="${placeholder}" class="w-full" ${sensitive?'data-sensitive-input="1" onfocus="_clearSensitivePlaceholder(this)"':''}>`;
+  }
+  return `
+    <div class="md:col-span-1 ${(it.type==='json' || it.textarea)?'md:col-span-2':''}">
+      <label class="flex items-center flex-wrap text-xs text-slate-400 block mb-1">
+        <span class="font-medium text-slate-300">${it.label}</span>
+        <span class="text-[10px] text-slate-500 ml-2">[${it.key}]</span>
+        ${sensitive?'<span class="text-[10px] text-sky-400 ml-1">🔒 加密入库</span>':''}
+        ${sourceBadge}
+      </label>
+      ${input}
+      ${hint}
+      ${emptyHint}
+    </div>`;
+}
+
+function _renderEnvOnly() {
+  const el = document.getElementById('settings-env-only');
+  // 显示重要安全提示
+  el.classList.remove('hidden');
+  el.innerHTML = `
+    <div class="flex items-start gap-3">
+      <div class="text-2xl">🛡️</div>
+      <div class="flex-1">
+        <div class="font-semibold text-emerald-300">所有配置已支持后台设置</div>
+        <div class="text-xs text-slate-300 mt-1">
+          HD 钱包助记词、Bot Token、API Hash 等敏感配置均可在本页面填写，
+          系统会使用加密算法安全存储。建议填写完成后 <b>立即备份助记词到离线存储</b>（纸质/密码管理器）。
+        </div>
+        <div class="mt-2 text-[11px] text-slate-500">
+          ⚠️ 助记词是钱包资金的唯一凭证，丢失无法找回！请务必离线备份。
+        </div>
+      </div>
+    </div>`;
+}
+
+async function loadSettings() {
+  const r = await adminFetch('/api/admin/settings/groups');
+  if (!r.ok) return toast(r.error||'加载失败','error');
+  _SETTINGS_STATE.groups = r.groups || [];
+  _SETTINGS_STATE.env_only = r.env_only || {};
+  _SETTINGS_STATE.active_group = 0;
+  // 顶部信息
+  document.getElementById('settings-version').textContent = r.app_version || '-';
+  const totalEditable = _SETTINGS_STATE.groups.reduce((s,g)=>s+g.items.filter(i=>!i.forbidden).length,0);
+  document.getElementById('settings-editable-count').textContent = totalEditable;
+  // 描述
+  const rd = (await adminFetch('/api/admin/settings/describe').catch(()=>{return {summary:{}}})) || {summary:{}};
+  document.getElementById('settings-rule').textContent = (rd.summary||{}).rule || '';
+  _renderGroupTabs();
+  _renderForm();
+  _renderEnvOnly();
+}
+
+async function saveAllSettings(event) {
+  // 遍历所有分组的所有字段，收集 {key: value}
+  const payload = {};
+  for (let gi = 0; gi < _SETTINGS_STATE.groups.length; gi++) {
+    const g = _SETTINGS_STATE.groups[gi];
+    for (let idx = 0; idx < g.items.length; idx++) {
+      const it = g.items[idx];
+      if (it.forbidden) continue;
+      let raw;
+      if (gi === _SETTINGS_STATE.active_group) {
+        const el = document.getElementById(`s-f-${idx}`);
+        if (!el) continue;
+        if (it.type === 'bool') raw = el.checked ? '1' : '0';
+        else raw = el.value;
+      } else {
+        raw = _formatValueForUI(it); // 用缓存的当前值（没改就是原值）
+      }
+      const parsed = _parseValueFromUI(it, raw);
+      if (parsed === undefined) continue; // 敏感占位符没改
+      payload[it.key] = parsed;
+    }
+  }
+  if (!Object.keys(payload).length) {
+    return toast('没有要保存的修改','warn');
+  }
+  const btn = event && event.target;
+  if (btn) { btn.disabled = true; const t = btn.textContent; btn.textContent='⏳ 保存中...'; setTimeout(()=>{btn.disabled=false; btn.textContent=t;}, 3000); }
+  const r = await adminFetch('/api/admin/settings/save', { values: payload });
+  if (!r.ok) return toast(r.error||'保存失败','error');
+  const res = r.result || {};
+  let msg = `✅ 已保存 ${(res.saved||[]).length + (res.applied||[]).length - (res.applied||[]).length} 项，即时生效`;
+  if (res.forbidden && res.forbidden.length) msg += ` · 🔐 ${res.forbidden.join(', ')} 被跳过（只能 .env 配置）`;
+  if (res.errors && res.errors.length) msg += ` · ⚠️ 错误: ${res.errors.slice(0,3).join(' / ')}`;
+  toast(msg, (res.errors && res.errors.length) ? 'warn' : 'success');
+  // 重新加载
+  await loadSettings();
+}
+
+// 启动：检查登录
+checkAuth();
+</script>
+</body>
+</html>

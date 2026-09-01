@@ -1,0 +1,126 @@
+====================================================================
+RELEASE NOTES — TG 搜索机器人 v1.0.2 (2026-08-23)
+====================================================================
+
+📦 版本标签：v1.0.2
+📅 发布日期：2026-08-23
+🧩 升级类型：修复 + 功能完善
+⚠️  升级建议：所有 v1.0.0/v1.0.1 用户必升
+
+--------------------------------------------------------------------
+一、升级亮点
+--------------------------------------------------------------------
+0) 【一键全自动部署】新增 auto_deploy.sh 🚀
+   - 只需把源码解压到服务器任意目录，执行 1 条命令即可完成部署
+   - 自动检测 OS（CentOS/Ubuntu/Debian）、自动安装系统依赖
+   - 自动编译 Python 3.11.9、创建 venv、安装 pip 依赖
+   - 自动初始化 .env、生成随机密钥、写入 Systemd 服务
+   - 自动配置 Nginx 反代、注册 3 条 crontab 定时任务
+   - 自动启动服务并验证 API 响应
+   - 支持多次执行（幂等），重复运行会自动修复已损坏的环境
+   - 使用方法：bash deploy/auto_deploy.sh
+   - 部署完后仅需 1 步：后台补全所有配置（含 HD 助记词）
+
+1) 【系统配置全后台化】所有配置均可在后台设置 🔐
+   - HD 钱包助记词现已支持在后台「⚙️ 系统配置」页面填写
+   - 助记词使用 AES 加密存储，安全可靠
+   - 6 个分组：
+     · 🤖 机器人配置（TG Bot Token 🔒、管理员 TG ID）
+     · 🎣 采集账号池（Telethon api_id / api_hash 🔒 / 手机号）
+     · 🔍 搜索与采集风控（5 项参数）
+     · 💰 钱包与广告定价（11 项：TronGrid🔒、充值确认、
+         专属机器人开通费、月/季/年订阅价、CPC/CPM、
+         广告最低预算、日消耗上限）
+     · ⚙️ 系统与安全（HD 助记词🔒、会话目录、DB 路径、日志目录/级别、版本仓库）
+   - 敏感字段（HD 助记词、TG Bot Token、api_hash、TronGrid、SESSION/CRYPTO
+     SECRET）全部 AES 加密入库，前端回显统一 "••••••" 占位
+   - 配置优先级：DB 覆盖 > .env > 代码默认值
+   - 保存后内存即时生效，无需重启服务；服务重启后自动从 DB
+     加载并覆盖 .env 默认值
+
+2) .env 文件瘦身到极致
+   - .env 现在仅需保留系统自动生成的随机密钥
+   - 所有业务配置（包括 HD 助记词）均可在后台填写
+   - 首次部署后直接进入后台配置即可，无需手动编辑 .env
+
+--------------------------------------------------------------------
+二、本次修复（解决 v1.0.1 的已知问题）
+--------------------------------------------------------------------
+✅ 修复：系统配置页面 JS 语法错误导致黑屏/无法渲染分组
+   - 根因1：ADMIN_PAGE_HTML 输出时会执行 .replace("}}","}")
+     导致 catch 回调对象字面量末尾的两个 }} 被吞掉一个，
+     出现 SyntaxError: Unexpected token ')'
+   - 根因2：敏感输入框 onfocus="if(...)" 的引号嵌套在 Python
+     三引号字符串中转义错误，出现 SyntaxError: Unexpected string
+   - 修复：
+     · catch 回调改为四个 } 的安全写法
+     · 新增独立函数 _clearSensitivePlaceholder(el)，
+       敏感输入框聚焦时自动清空占位符圆点
+
+✅ 修复：/api/admin/settings/groups 返回 500 TypeError
+   - 根因：判断 "v not in mask_sensitive" 时，配置值 v 为
+     list（如 API_IDS、ADMIN_TG_IDS）时与 Python set 做
+     比较会抛 unhashable type: 'list'
+   - 修复：改为 tuple + 分类型空值判断（list/dict 看长度，
+     其他类型看 bool）
+
+✅ 优化：保存敏感字段时，占位符 "••••••" / "******" 一律
+        视为「用户未修改」，不会覆盖掉 DB/.env 中的真实值
+
+--------------------------------------------------------------------
+三、数据库变更
+--------------------------------------------------------------------
+- 新增 system_settings 表（首次启动 app/database.py 自动建表，
+  无需手工执行 SQL）：
+  · setting_key    TEXT UNIQUE  配置键名（如 TG_BOT_TOKEN）
+  · setting_value  TEXT         编码后的配置值（加密字段带 ENC: 前缀）
+  · value_type     TEXT         str/int/float/bool/list_int/list_str/json
+  · is_encrypted   INTEGER      1=加密存储，0=明文
+  · description    TEXT         字段说明
+  · updated_at     TIMESTAMP    最近修改时间
+- 升级方式：直接替换源码、重启服务即可，DB 会自动 CREATE TABLE IF NOT EXISTS
+
+--------------------------------------------------------------------
+四、升级步骤（从 v1.0.0/v1.0.1 升级）
+--------------------------------------------------------------------
+1. 备份数据库（建议）：
+   $ cp /www/wwwroot/tg-search-bot/data/tg_search.db \
+        /www/wwwroot/tg-search-bot/data/backups/before_v1.0.2_$(date +%Y%m%d).db
+
+2. 停服务：
+   $ systemctl stop tg-search-bot
+
+3. 替换源码（保留 .env、data/、logs/、venv/）：
+   $ unzip -o tg-search-bot-v1.0.2-20260823.zip -d /tmp/tg-update
+   $ rsync -av --exclude='.env' --exclude='data/' --exclude='logs/' \
+        --exclude='venv/' /tmp/tg-update/tg-search-bot/ \
+        /www/wwwroot/tg-search-bot/
+
+4. 更新依赖（如果 requirements.txt 有变动）：
+   $ cd /www/wwwroot/tg-search-bot
+   $ source venv/bin/activate
+   $ pip install -r requirements.txt -i \
+       https://pypi.tuna.tsinghua.edu.cn/simple
+
+5. 启动服务：
+   $ systemctl daemon-reload
+   $ systemctl start tg-search-bot
+   $ systemctl status tg-search-bot   # 确认 active (running)
+   $ journalctl -u tg-search-bot -n 50 --no-pager  # 看日志
+
+6. 登录后台 → 左侧「⚙️ 系统配置」→ 补全配置并点「保存全部并生效」
+   （注意：HD 钱包助记词仍然只能在 .env 里手写，后台无法录入）
+
+--------------------------------------------------------------------
+五、部署相关文件
+--------------------------------------------------------------------
+deploy/baota_install.sh          宝塔面板一键安装脚本（CentOS/Ubuntu/Debian）
+deploy/docker-entrypoint.sh      Docker 容器入口
+deploy/scripts/health_check.sh   健康检查（配合定时任务用）
+deploy/scripts/manual_backup.sh  手工备份脚本
+deploy/scripts/login_accounts.sh 采集账号首次登录/输入短信验证码脚本
+deploy/scripts/generate_secrets.sh  生成 SESSION_SECRET / CRYPTO_SECRET
+.env.example                     所有环境变量示例 + 详细中文注释
+.env.production                  生产环境模板（带生产推荐值）
+
+====================================================================

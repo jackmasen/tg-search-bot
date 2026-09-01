@@ -1,0 +1,641 @@
+====================================================================
+TG 搜索机器人 v1.0.2 — 宝塔面板 + Linux 服务器部署手册
+更新日期：2026-08-23
+适用系统：CentOS 7+ / Ubuntu 20.04+ / Debian 11+
+====================================================================
+
+════════════════════════════════════════════════════════════════════
+🚀 极速模式（推荐！只需 1 条命令）
+════════════════════════════════════════════════════════════════════
+如果您不想一步步手动部署，可以使用全自动脚本：
+
+  # 1. 把源码解压到服务器任意目录（比如 /tmp）
+  cd /tmp && unzip tg-search-bot-v1.0.2-20260823.zip
+
+  # 2. 进入解压目录，执行一键脚本
+  cd tg-search-bot
+  bash deploy/auto_deploy.sh
+
+脚本会自动完成 14 件事：
+  ✅ 检测 OS / CPU 架构 / 是否 root
+  ✅ 识别项目目录（自动寻找 main.py）
+  ✅ 复制源码到 /www/wwwroot/tg-search-bot
+  ✅ 创建 data/ logs/ backups/ sessions/ 目录
+  ✅ 安装系统依赖（apt/yum 自动识别）
+  ✅ 编译/下载 Python 3.11.9（如未安装）
+  ✅ 创建 venv 虚拟环境
+  ✅ pip 安装 requirements.txt（清华镜像）
+  ✅ 验证所有依赖（fastapi/telethon/aiosqlite/jieba）
+  ✅ 初始化 .env（自动生成 SESSION_SECRET / CRYPTO_SECRET）
+  ✅ 写入 Systemd 服务 + 开机自启
+  ✅ 配置 Nginx 反代（如已装 Nginx）
+  ✅ 注册 3 条 crontab 定时任务
+  ✅ 启动服务并验证 API 响应
+
+脚本执行完后，您只需 1 步手工操作：
+  ① 后台 ⚙️ 系统配置 补全所有配置（含 HD 助记词）
+
+可选操作（在后台完成）：
+  · 🐢 小号管理：后台「小号/代理管理」→ 新增小号
+    支持三步向导：发送验证码 → 验证登录 → 配置保存
+  · 也可终端登录：bash deploy/scripts/login_accounts.sh
+
+详细说明见下方章节。
+
+════════════════════════════════════════════════════════════════════
+完整部署手册（逐步了解 / 排错参考）
+════════════════════════════════════════════════════════════════════
+
+目录：
+  0. 准备工作（必须先看 ⚠️）
+  1. 安装宝塔面板
+  2. 上传并解压源码包
+  3. 方式 A：一键脚本部署（推荐，新手）
+  4. 方式 B：手工一步步部署（老手 / 排错）
+  5. 手写 .env 的安全项（只有这部分需要改文件）
+  6. 首次登录采集小号（输入短信验证码）
+  7. 启动服务并检查
+  8. 后台首次配置（进入系统 → ⚙️ 系统配置 补全 26 项）
+  9. Nginx 反向代理 + HTTPS（可选但强烈推荐）
+  10. 定时任务（备份 / 充值对账 / 日志清理）
+  11. 常见运维命令速查
+  12. 排错手册（常见错误 + 解决方案）
+  13. 升级到新版本步骤
+  14. 安全红线（必读，涉及资产安全）
+
+====================================================================
+0. 准备工作（必须先看 ⚠️）
+====================================================================
+0.1 服务器要求
+  - CPU：≥ 1 核（推荐 2 核+）
+  - 内存：≥ 1GB（推荐 2GB+）
+  - 硬盘：≥ 20GB SSD
+  - 系统：CentOS 7+ / Ubuntu 20.04+ / Debian 11+
+  - 网络：能访问 Telegram 服务器（my.telegram.org、api.telegram.org）
+    · 中国大陆服务器必须使用境外代理/中继；推荐选海外服务器
+      （香港、新加坡、日本、美国等）
+
+0.2 您需要准备的材料清单
+  材料                            说明 & 获取方式
+  ─────────────────────────────────────────────────────────
+  (a) Telegram Bot Token          登录 TG → 找 @BotFather
+                                  发送 /newbot 按提示创建，得到
+                                  格式：123456789:ABC-DEF1234ghIkl-zyx57W2v1u123ew11
+                                  【v1.0.2 可在后台填写】
+
+  (b) 管理员 TG ID（个人 ID）     把任意一条消息转发给
+                                  @userinfobot 或 @getidsbot，
+                                  读取 from.id 数字
+                                  【v1.0.2 可在后台填写】
+
+  (c) Telethon api_id / api_hash  打开 https://my.telegram.org，
+                                  用 TG 手机号登录 → API tools →
+                                  Create new application，拿到
+                                  一组 api_id（数字）和
+                                  api_hash（32 位字母串）
+                                  【v1.0.2 可在后台填写多组】
+
+  (d) 采集小号（至少 1 个，       带 +86 等国际区号的真实 TG
+      推荐 3 个起）               注册手机号，密码可留空
+                                  【v1.0.2 可在后台填手机号，
+                                   首次登录在命令行输入验证码】
+
+  (e) TronGrid API Key（可选，    免费申请 https://www.trongrid.io
+       用于 USDT 充值对账）        用于查询链上充值交易
+                                  【v1.0.2 可在后台填写】
+
+  (f) ⚠️  HD 钱包助记词           12 或 24 个英文单词，空格分隔
+      【唯一必须手写在 .env 的项】
+      · 建议使用 TronLink 创建钱包时自动生成的助记词
+      · 创建后立即写在纸上 → 锁入保险箱，切勿截图/拍照
+      · 索引 0 地址 = 运营方归集主地址（不要分配给用户）
+      · 用户充值地址会用 BIP44 m/44'/195'/0'/0/{index}
+        自动从助记词派生（index ≥ 1）
+      · 绝对不要：粘贴到任何聊天软件 / 上传到网盘 /
+        录入到后台表单 / 用微信传输。资金丢失无法找回。
+
+  (g) 域名（可选）                绑定到服务器 IP，便于后台访问
+                                  如 admin.yourdomain.com
+
+0.3 安装方式选择
+  · 新手 / 想省事 → 选【方式 A：一键脚本部署】
+  · 老手 / 想完全可控 / 出问题想一步步调试 → 选【方式 B：手工部署】
+  · 两种方式部署完，最终效果完全一致
+
+====================================================================
+1. 安装宝塔面板
+====================================================================
+按服务器系统复制对应命令（SSH 用 root 登录执行）：
+
+CentOS：
+  $ yum install -y wget && wget -O install.sh \
+      https://download.bt.cn/install/install_6.0.sh && \
+      sh install.sh ed8484bec
+
+Ubuntu / Debian：
+  $ wget -O install.sh \
+      https://download.bt.cn/install/install-ubuntu_6.0.sh && \
+      sudo bash install.sh ed8484bec
+
+安装完成后终端会输出：
+  - 外网面板地址（如 http://IP:8888/xxxxxx）
+  - username / password
+浏览器登录宝塔 → 软件商店安装以下两个：
+  ① Nginx 1.24+（反向代理 + HTTPS 用）
+  ② Python 项目管理器 2.x（如果想用图形化启停，可选）
+
+宝塔防火墙放行端口：
+  宝塔 → 安全 → 放行：80、443、8001（临时调试用，配完 Nginx 可关掉 8001）
+云服务商安全组也放行：80、443、8001
+
+====================================================================
+2. 上传并解压源码包
+====================================================================
+2.1 宝塔文件管理器方式（简单）
+  ① 本机解压 tg-search-bot-v1.0.2-20260823.zip
+  ② 宝塔 → 文件 → 进入 /www/wwwroot/
+  ③ 新建目录 tg-search-bot
+  ④ 进入 /www/wwwroot/tg-search-bot/
+  ⑤ 把解压后的所有文件拖拽上传（注意：.env.example、
+     .env.production、deploy/ 目录都要上传）
+
+2.2 命令行方式（推荐，不丢权限）
+  ① 在本机 Windows PowerShell 用 scp / pscp / FileZilla SFTP 上传
+     $ scp tg-search-bot-v1.0.2-20260823.zip \
+           root@您的服务器IP:/tmp/
+  ② SSH 到服务器执行：
+     $ mkdir -p /www/wwwroot/tg-search-bot
+     $ cd /tmp && unzip tg-search-bot-v1.0.2-20260823.zip
+     $ cp -r tg-search-bot/* /www/wwwroot/tg-search-bot/
+     $ cp -r tg-search-bot/.env.* /www/wwwroot/tg-search-bot/
+     $ chown -R www:www /www/wwwroot/tg-search-bot
+
+====================================================================
+3. 方式 A：一键脚本部署（推荐，新手）
+====================================================================
+脚本位置：/www/wwwroot/tg-search-bot/deploy/baota_install.sh
+它会自动完成：
+  · 安装系统依赖（git、gcc、libffi-devel 等）
+  · 安装 Python 3.11（如果系统没有）
+  · 创建 venv 虚拟环境到 ./venv
+  · 清华镜像 pip 安装 requirements.txt
+  · 从 .env.production 复制生成一份初始 .env（您再手改）
+  · 创建 data/ logs/ data/sessions/ data/backups 目录
+  · 创建 /etc/systemd/system/tg-search-bot.service 开机自启
+  · 写好 Nginx 站点配置模板（到 deploy/nginx.conf.template）
+  · 注册定时任务（备份 / 充值对账 / 日志清理）
+
+执行命令：
+  $ cd /www/wwwroot/tg-search-bot
+  $ chmod +x deploy/baota_install.sh
+  $ bash deploy/baota_install.sh
+
+脚本跑完如果看到下面三行代表成功：
+  ✅ Python venv + 依赖安装完成
+  ✅ Systemd 服务 tg-search-bot 已创建
+  ✅ 请先手动编辑 /www/wwwroot/tg-search-bot/.env
+     填好 HD_WALLET_MNEMONIC 后再启动服务
+
+然后跳到【第 5 步 手写 .env 的安全项】。
+
+====================================================================
+4. 方式 B：手工一步步部署（老手 / 排错）
+====================================================================
+4.1 系统依赖
+CentOS：
+  $ yum install -y git gcc gcc-c++ make libffi-devel \
+      zlib-devel bzip2-devel openssl-devel ncurses-devel \
+      sqlite-devel readline-devel tk-devel gdbm-devel \
+      xz-devel wget curl
+
+Ubuntu/Debian：
+  $ apt update && apt install -y git build-essential \
+      libffi-dev zlib1g-dev libbz2-dev libssl-dev \
+      libncurses5-dev libsqlite3-dev libreadline-dev \
+      libgdbm-dev liblzma-dev wget curl
+
+4.2 安装 Python 3.11（如果系统默认 < 3.10）
+  $ python3 --version   # 若已 ≥ 3.10 可跳过本小节
+  $ cd /tmp
+  $ wget https://registry.npmmirror.com/-/binary/python/3.11.9/Python-3.11.9.tgz
+  $ tar -xzf Python-3.11.9.tgz
+  $ cd Python-3.11.9
+  $ ./configure --prefix=/usr/local/python311 --enable-optimizations --with-ssl
+  $ make -j$(nproc) && make altinstall
+  $ ln -sf /usr/local/python311/bin/python3.11 /usr/local/bin/python3.11
+  $ python3.11 -m pip install --upgrade pip -i \
+      https://pypi.tuna.tsinghua.edu.cn/simple
+
+4.3 创建虚拟环境 + 安装依赖
+  $ cd /www/wwwroot/tg-search-bot
+  $ python3.11 -m venv venv
+  $ source venv/bin/activate
+  (venv) $ pip install --upgrade pip setuptools wheel -i \
+           https://pypi.tuna.tsinghua.edu.cn/simple
+  (venv) $ pip install -r requirements.txt -i \
+           https://pypi.tuna.tsinghua.edu.cn/simple
+  # 验证安装（不应有 ModuleNotFoundError）：
+  (venv) $ python -c "import fastapi, telethon, aiosqlite, jieba; print('✅ 依赖OK')"
+
+4.4 创建目录 + 复制初始 .env
+  $ mkdir -p data/sessions data/backups logs
+  $ cp -n .env.production .env
+
+4.5 创建 Systemd 服务（开机自启 + 守护进程）
+  $ cat > /etc/systemd/system/tg-search-bot.service << 'EOF'
+[Unit]
+Description=TG Search Bot Service (v1.0.2)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/www/wwwroot/tg-search-bot
+Environment="PYTHONUNBUFFERED=1"
+ExecStart=/www/wwwroot/tg-search-bot/venv/bin/python -u main.py
+Restart=always
+RestartSec=5
+StandardOutput=append:/www/wwwroot/tg-search-bot/logs/stdout.log
+StandardError=append:/www/wwwroot/tg-search-bot/logs/stderr.log
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  $ systemctl daemon-reload
+  $ systemctl enable tg-search-bot   # 开机自启
+  # 注意：⚠️ 先别 start，等第 5 步写好 .env、第 6 步登录完小号再启动
+
+4.6 Nginx 模板（可选，第 9 步有详细）
+  先不急，等系统跑通了再配 Nginx + HTTPS。
+
+====================================================================
+5. 手写 .env 的安全项（只有这部分需要改文件）
+====================================================================
+⚠️  v1.0.2 开始，除 HD 钱包助记词外，其他配置都可以在后台
+    「⚙️ 系统配置」页面填写保存。这一步您只需要填
+    HD_WALLET_MNEMONIC 即可。其他的留空没关系，进后台补。
+
+编辑 .env：
+  $ cd /www/wwwroot/tg-search-bot
+  $ vim .env        # 或宝塔文件管理器可视化编辑 .env
+
+================= 最少必填（仅 3 行左右） ======================
+# ------ [🔐 安全硬约束] 下面这一行只能手写在 .env，绝对不能 ------
+# ------ 在后台录入。写完立刻把助记词抄到纸 → 锁保险箱。 ------
+HD_WALLET_MNEMONIC=单词1 单词2 单词3 单词4 单词5 单词6 单词7 单词8 单词9 单词10 单词11 单词12
+
+# ------ [加密密钥] 首次部署生成一次固定，不要改，改了会 ------
+# ------ 导致 DB 中加密配置读不出来。 -------------------------
+# 如果想让 deploy 脚本帮您生成强随机，可先执行：
+#   $ bash deploy/scripts/generate_secrets.sh
+SESSION_SECRET=这里填 64 位以上随机字符串（字母数字混合）
+CRYPTO_SECRET=这里填 64 位以上随机字符串（字母数字混合，不同于上面那条）
+
+# ------ 其余 26 项全部可在后台填写 ------
+# 您可以都留空，启动服务后登录后台 → ⚙️ 系统配置 → 填完保存。
+====================================================================
+
+⚠️  写完 .env 之后做三件事：
+  ① 把 HD_WALLET_MNEMONIC 抄到纸上 → 对折 → 锁入保险箱。
+  ② 删除终端里的历史（防止别人 grep 助记词）：
+     $ history -c && rm -f ~/.bash_history
+  ③ 退出 SSH 重登一次，防止终端 scrollback 被人看到。
+
+====================================================================
+6. 首次登录采集小号（输入短信验证码）
+====================================================================
+⚠️  必须在【启动 systemd 服务之前】完成！
+    因为小号登录需要您交互式输入短信验证码、2FA 密码（如开了）。
+    而后台 systemd 是无人值守的，没法让您打字。
+
+进入 venv 并运行登录脚本：
+  $ cd /www/wwwroot/tg-search-bot
+  $ source venv/bin/activate
+  (venv) $ bash deploy/scripts/login_accounts.sh
+
+脚本会循环每一组 api_id/api_hash/手机号，让您做：
+  ① 按 Enter 发送短信验证码
+  ② 输入收到的 5 位数字短信验证码（如 12345）
+  ③ 如果开了 2FA（二级密码），再输入二级密码
+  ④ 显示 "会话写入成功: data/sessions/account_1.session" 即 OK
+每个 session 文件对应一个小号，以后都不需要再登录
+（除非 session 过期 / 换 IP 导致掉线）
+
+登录完验证：
+  (venv) $ ls -la data/sessions/
+  应该能看到 account_1.session、account_2.session …
+
+====================================================================
+7. 启动服务并检查
+====================================================================
+7.1 先做最小自测（不通过 systemd，直接前台跑 main.py）
+  $ cd /www/wwwroot/tg-search-bot
+  $ source venv/bin/activate
+  (venv) $ timeout 20 python main.py   # 20 秒无报错 Ctrl+C 结束
+观察输出：
+  · 不应有 ModuleNotFoundError → 缺依赖，回去 pip install
+  · 不应有 ValueError: 配置校验失败 → 说明 .env / 后台配置都没填
+    → 这是正常的（v1.0.2 可先启动，后台填完就 OK）
+  · 不应有 "HD wallet derive failed" → 助记词写错/格式不对
+看到 "Uvicorn running on http://127.0.0.1:8000" 代表启动成功，
+按 Ctrl+C 结束。
+
+7.2 正式用 Systemd 启动：
+  $ systemctl start tg-search-bot
+  $ systemctl status tg-search-bot
+  期望看到：active (running)
+
+7.3 查看日志（最常用的排错入口）
+  应用日志：
+    $ tail -f logs/app.log      # 应用业务日志
+    $ tail -f logs/stdout.log   # main.py 的 print 输出
+    $ tail -f logs/stderr.log   # 报错堆栈（重点看这个！）
+  Systemd 日志：
+    $ journalctl -u tg-search-bot -n 100 --no-pager
+    $ journalctl -u tg-search-bot -f      # 持续追踪
+
+7.4 请求测试
+  $ curl -s http://127.0.0.1:8000/api/admin/settings/describe | head
+  如果看到 JSON（即使是 401 未登录）说明 FastAPI 已工作。
+
+====================================================================
+8. 后台首次配置（进入系统 → ⚙️ 系统配置 补全 26 项）
+====================================================================
+浏览器打开：
+  · 没配域名： http://服务器IP:8001/admin
+  · 已配域名： https://admin.yourdomain.com/admin
+输入账号密码（演示默认：admin / demo123456，建议立刻在后台改）
+登录后左侧菜单最下方 → ⚙️ 系统配置，按分组依次填写：
+
+8.1 🤖 机器人配置
+  ▸ TG Bot Token           🔒加密  必填  @BotFather 给的 123456:xxxxx
+  ▸ 管理员 TG ID                   必填  个人 ID，多个用英文逗号分隔
+
+8.2 🎣 采集账号池（三项数量必须一致）
+  ▸ Telethon api_id                 必填  my.telegram.org 申请，多组逗号分隔
+  ▸ Telethon api_hash       🔒加密  必填  与 api_id 一一对应
+  ▸ 采集手机号                       必填  +86xxxx，一一对应
+
+8.3 🔍 搜索与采集风控（默认值可直接用，想调再改）
+  ▸ 单次搜索返回条数               默认 20
+  ▸ 免费用户每日搜索次数           默认 5（0=无限）
+  ▸ 单账号最大订阅频道数           默认 450（上限 500）
+  ▸ 每次 Join 间隔秒数             默认 45
+  ▸ 单账号每日最大 Join 次数       默认 40
+
+8.4 💰 钱包与广告定价
+  ▸ TronGrid API Key       🔒加密  推荐填（否则对账可能被限频）
+  ▸ 充值确认区块数                  默认 12（TRON≈36秒确认）
+  ▸ 最低充值金额（USDT）            默认 0.5（防灰尘攻击）
+  ▸ 专属机器人开通费（USDT）        默认 500
+  ▸ 月度订阅（USDT）                默认 99
+  ▸ 季度订阅（USDT）                默认 267
+  ▸ 年度订阅（USDT）                默认 950
+  ▸ 默认 CPC 单价（USDT/点击）      默认 0.01
+  ▸ 默认 CPM 单价（USDT/千曝）      默认 0.5
+  ▸ 广告最低预算（USDT）            默认 1
+  ▸ 每日最高消耗上限（0=不限）       默认 0
+
+8.5 ⚙️ 系统与路径（默认值可直接用）
+  ▸ 采集账号会话目录        默认 ./data/sessions
+  ▸ SQLite 数据库路径       默认 ./data/tg_search.db
+  ▸ 日志目录                默认 ./logs
+  ▸ 日志级别                默认 INFO（调试改 DEBUG）
+  ▸ 版本更新 Git 仓库（可选）       用于后台一键升级
+
+填完后点右下角【💾 保存全部并生效】。
+→ 右上角绿色 Toast 出现即代表「已写入 DB + 内存即时生效」，
+   无需重启服务，也不需要重登。
+
+====================================================================
+9. Nginx 反向代理 + HTTPS（可选但强烈推荐）
+====================================================================
+目标：用户访问 https://admin.yourdomain.com/admin
+      → Nginx 反代到本机 127.0.0.1:8001/admin
+
+9.1 宝塔 → 网站 → 添加站点
+  域名：admin.yourdomain.com
+  根目录：/www/wwwroot/tg-search-bot
+  PHP 版本：纯静态
+  创建完进入站点设置 → SSL → Let's Encrypt 申请证书并开启强制 HTTPS
+
+9.2 站点设置 → 配置文件，在 server {} 块里加：
+    location / {
+        proxy_pass http://127.0.0.1:8001;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+        # SSE / 长连接需要
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+保存后重载 Nginx：宝塔面板 → 服务 → Nginx → 重载配置
+
+9.3 关掉 8001 对外端口（仅本机访问 + Nginx 转发，更安全）
+  宝塔 → 安全 → 删除 8001 放行规则
+  云服务商安全组也删掉 8001
+
+====================================================================
+10. 定时任务（备份 / 充值对账 / 日志清理）
+====================================================================
+宝塔 → 计划任务 → Shell 脚本，添加 3 条：
+
+① 每日数据库备份（建议 03:00 执行）
+  任务类型：Shell 脚本
+  执行周期：每天 03:00
+  脚本内容：
+    cd /www/wwwroot/tg-search-bot && \
+    bash deploy/scripts/manual_backup.sh >> \
+      logs/cron_backup.log 2>&1
+
+② 每 5 分钟 USDT 充值对账（核心运营任务，必加）
+  任务类型：Shell 脚本
+  执行周期：N 分钟，5 分钟
+  脚本内容：
+    cd /www/wwwroot/tg-search-bot && \
+    source venv/bin/activate && \
+    python -c "
+    import asyncio
+    from app.wallet.wallet_manager import WalletManager
+    async def main():
+        wm = WalletManager()
+        r = await wm.scan_deposits_and_credit()
+        print(r)
+    asyncio.run(main())
+    " >> logs/cron_recharge.log 2>&1
+
+③ 每周日志清理（保留最近 14 天）
+  任务类型：Shell 脚本
+  执行周期：每周一 04:00
+  脚本内容：
+    cd /www/wwwroot/tg-search-bot/logs && \
+    find . -name '*.log' -mtime +14 -delete && \
+    echo "$(date '+%F %T') logs cleaned"
+
+一键脚本 deploy/baota_install.sh 若您是方式 A 部署，已自动写好以上 3 条。
+
+====================================================================
+11. 常见运维命令速查
+====================================================================
+# 服务状态
+systemctl status tg-search-bot       # 看状态
+systemctl start  tg-search-bot       # 启动
+systemctl stop   tg-search-bot       # 停止
+systemctl restart tg-search-bot      # 重启（改代码/改.env后用）
+systemctl reload  tg-search-bot      # 平滑重载（不一定生效，推荐 restart）
+systemctl enable tg-search-bot       # 设为开机自启
+systemctl disable tg-search-bot      # 取消开机自启
+
+# 看日志
+journalctl -u tg-search-bot -n 100 --no-pager   # 最近 100 行 systemd
+journalctl -u tg-search-bot -f                   # 实时滚动
+tail -n 200 logs/stderr.log                      # 看报错
+tail -n 200 logs/app.log                         # 看业务
+tail -n 100 logs/stdout.log                      # 看 print 输出
+
+# 数据库备份 / 恢复
+bash deploy/scripts/manual_backup.sh                        # 立即备份
+ls -lh data/backups/                                        # 看备份列表
+# 恢复：后台 → 🛠 系统升级与维护 → 选择备份 → 点恢复
+
+# 小号健康检查
+cd /www/wwwroot/tg-search-bot && source venv/bin/activate
+bash deploy/scripts/health_check.sh                         # 看所有小号在线/封禁情况
+
+# 改后台管理员 TG ID（新增管理员）
+# 方式 1：.env 里改 ADMIN_TG_IDS=新ID,旧ID  → systemctl restart
+# 方式 2：v1.0.2 推荐 → 后台「⚙️ 系统配置 → 🤖 机器人配置」
+#          直接改管理员 TG ID → 保存 → 即时生效（不用重启）
+
+====================================================================
+12. 排错手册（常见错误 + 解决方案）
+====================================================================
+Q1. systemctl start 后立刻变成 inactive / failed
+A. 看 journalctl -u tg-search-bot -n 200 最常见 3 类：
+   ① ModuleNotFoundError: No module named 'xxx'
+     → pip install xxx -i 清华镜像（注意要先 source venv/bin/activate）
+   ② ValueError: 配置校验失败: TG_BOT_TOKEN 未配置
+     → 后台「⚙️ 系统配置 → 🤖 机器人配置」填 TG Bot Token
+   ③  PermissionError: [Errno 13] Permission denied: 'data/xxx'
+     → chown -R root:root /www/wwwroot/tg-search-bot
+        （systemd 里 User=root 时目录 owner 要一致）
+
+Q2. 机器人发消息没反应 / 用户搜不到内容
+A. 步骤排查：
+   ① 看 logs/app.log 有没有收到用户消息 → 没收到 = Bot Token 不对 /
+     服务器网络被墙 / 没开 webhook（本项目是 long polling，不需要 webhook）
+   ② 看小号健康：bash deploy/scripts/health_check.sh
+     · 出现 BANNED / DELETED → 去后台「🎣 小号/代理管理」删掉换号
+     · Ping > 2000ms → 网络不通 / 代理要配置
+   ③ Join 频道失败：搜索风控限制过严，把 JOIN_INTERVAL_SECONDS
+     调大到 60、MAX_JOIN_PER_DAY 调大到 50
+
+Q3. 用户充值 USDT 后余额没加
+A. 先按顺序排查：
+   ① 确认用户是 TRC20 网络充值到他「个人专属地址」
+      （用户发 /recharge 拿到的那串 T 开头地址）
+   ② 确认区块已经 ≥ RECHARGE_CONFIRMATIONS 确认
+   ③ 手动跑一次充值对账看输出：
+      cd /www/wwwroot/tg-search-bot
+      source venv/bin/activate
+      python -c "
+      import asyncio
+      from app.wallet.wallet_manager import WalletManager
+      async def main():
+          wm = WalletManager()
+          r = await wm.scan_deposits_and_credit(verbose=True)
+          print(r)
+      asyncio.run(main())
+      "
+   ④ 看有没有写定时任务（第 10 步的第 ② 条）；执行周期是不是 5 分钟
+   ⑤ TronGrid API Key 被限频 → 后台填 TronGrid API Key
+
+Q4. 后台配置保存后好像没生效
+A. v1.0.2 保存后有两条链路同时生效：
+   ① 内存：Config 类 apply_overrides 立即生效 → 机器人下一条消息
+     就用新配置
+   ② 持久化：system_settings 表 → 下次启动自动加载
+   如果还是旧值，点「🔄 重新加载」看前端当前值，
+   或 systemctl restart tg-search-bot 重启强制从 DB 读一次。
+
+Q5. 浏览器打开 /admin 黑屏
+A. 旧缓存的 JS 语法错误 → 强制刷新：Ctrl+Shift+R，
+   或访问 /admin?nocache=时间戳。还不行 → F12 → Console 把报错
+   截图发给技术支持。
+
+Q6. HD 钱包地址不对 / 想验证主地址
+A. 助记词索引 0 地址应当等于 TronLink 里的主地址。用下面命令核对：
+   cd /www/wwwroot/tg-search-bot && source venv/bin/activate
+   python -c "
+   import os; from dotenv import load_dotenv; load_dotenv()
+   mnemonic = os.getenv('HD_WALLET_MNEMONIC','').strip()
+   if not mnemonic: print('⚠️  .env 没填 HD_WALLET_MNEMONIC'); exit()
+   try:
+       from app.wallet.wallet_manager import derive_tron_address
+       addr0 = derive_tron_address(mnemonic, 0)
+       print('✅ 主地址(索引0) =', addr0, '  请和 TronLink 核对一致')
+   except Exception as e:
+       print('❌ 派生失败：', e)
+   "
+不一致 = 助记词输入错误 / 大小写错误 / 多打了空格。
+
+====================================================================
+13. 升级到新版本步骤（例如以后 v1.0.3）
+====================================================================
+① 立刻备份 DB 和 .env（一定要做）
+  $ cp -a data/ /tmp/data_backup_$(date +%Y%m%d)/
+  $ cp .env /tmp/.env_backup_$(date +%Y%m%d)
+
+② 停服务
+  $ systemctl stop tg-search-bot
+
+③ 替换源码（保留 .env / data / logs / venv）
+  $ unzip -o tg-search-bot-vX.Y.Z-YYYYMMDD.zip -d /tmp/newver
+  $ rsync -av \
+       --exclude='.env' \
+       --exclude='data/' \
+       --exclude='logs/' \
+       --exclude='venv/' \
+       /tmp/newver/tg-search-bot/ /www/wwwroot/tg-search-bot/
+
+④ 更新依赖（requirements.txt 有变动时）
+  $ cd /www/wwwroot/tg-search-bot && source venv/bin/activate
+  (venv) $ pip install -r requirements.txt -i \
+           https://pypi.tuna.tsinghua.edu.cn/simple
+
+⑤ 启动
+  $ systemctl daemon-reload
+  $ systemctl start tg-search-bot
+  $ systemctl status tg-search-bot
+
+⑥ 登录后台 → ⚙️ 系统配置 → 确认配置都在 → 点保存一次即可。
+
+====================================================================
+14. 安全红线（必读，涉及资产安全）
+====================================================================
+🔴 红线 1：HD_WALLET_MNEMONIC 只能手写在 .env 文件 + 纸上备份，
+          绝对不能：
+            · 录入后台系统配置页面（代码级拒绝写入 + 拒绝回显）
+            · 截图 / 拍照
+            · 通过微信、TG、邮件发给任何人
+            · 放到云盘 / 笔记同步
+            · 放到 Git 仓库（含私有仓库）
+🔴 红线 2：所有用户充值必须是 **USDT-TRC20** 网络！
+          用户充到 ERC20 / BEP20 等其他网络 = 永久丢失，不找回
+🔴 红线 3：助记词索引 0 = 运营主地址，用于归集；
+          用户专属地址从索引 1、2、3 … 开始自动派生。
+🔴 红线 4：SESSION_SECRET / CRYPTO_SECRET 一旦固定不要改！
+          改了会导致加密字段（TG Bot Token、api_hash 等）
+          全部解密失败，整个后台配置必须重新录入一遍。
+🔴 红线 5：DB 与 session 文件定期离线备份，
+          data/tg_search.db、data/sessions/*.session 丢了 =
+          小号登录态全失效、用户数据、订单、配置全没。
+
+====================================================================
+祝部署顺利！有问题按第 11 / 12 章的命令和日志定位，
+或联系技术支持提供 logs/stderr.log 最近 200 行。
+====================================================================

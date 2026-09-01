@@ -1,0 +1,179 @@
+# ============================================================
+# TG搜索机器人 - Docker Compose部署文件
+# 推荐部署方式：容器化，环境隔离，迁移方便
+#
+# 使用步骤：
+# 1. cp .env.example .env  并填入真实配置
+# 2. docker compose up -d  # 启动（后台运行）
+# 3. docker compose logs -f  # 查看日志
+# 4. docker compose exec bot bash scripts/login_accounts.sh  # 首次登录采集账号
+# 5. docker compose restart bot  # 登录完成后重启
+# ============================================================
+
+version: '3.8'
+
+services:
+  # ============ 主服务：TG搜索Bot ============
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: tg-search-bot:latest
+    container_name: tg-search-bot
+    restart: unless-stopped
+    tty: true
+    stdin_open: true  # 允许交互式登录采集账号
+    environment:
+      # 优先使用环境变量（会自动写入.env）
+      - TZ=Asia/Shanghai
+      # ===== 以下配置可直接写在这里，也可写到 .env 文件 =====
+      # TG_BOT_TOKEN: "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
+      # TELETHON_API_IDS: "12345,67890"
+      # TELETHON_API_HASHS: "abc123,def456"
+      # TELETHON_PHONES: "+8613800001111,+8613800002222"
+      # TRONGRID_API_KEY: ""    # 第2步：USDT充值监控用
+      # HD_WALLET_MNEMONIC: ""  # 第2步：HD钱包助记词，12/24个单词，空格分隔
+      # ADMIN_TG_IDS: "123456789,987654321"  # 管理员TG ID
+    volumes:
+      # 数据卷（核心！持久化数据库、session、日志）
+      - ./data:/app/data
+      - ./logs:/app/logs
+      # .env 直接挂载进去（修改无需重新构建镜像）
+      - ./.env:/app/.env:ro
+      # 脚本目录
+      - ./deploy/scripts:/app/scripts:ro
+    # 资源限制（根据服务器配置调整）
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+    # 安全限制
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    # 健康检查
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; import sys; import os; import time; files=[f for f in os.listdir('/app/logs') if f.endswith('.log')]; sys.exit(0 if not files else (0 if time.time()-max(os.path.getmtime(os.path.join('/app/logs',f)) for f in files)<300 else 1))"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+    networks:
+      - tg-bot-net
+
+  # ============ 可选：管理后台（FastAPI，第3阶段开发后启用） ============
+  # admin:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile.admin
+  #   container_name: tg-search-bot-admin
+  #   restart: unless-stopped
+  #   environment:
+  #     - TZ=Asia/Shanghai
+  #   ports:
+  #     - "8001:8001"
+  #   volumes:
+  #     - ./data:/app/data
+  #   networks:
+  #     - tg-bot-net
+
+  # ============ 可选：Nginx反向代理（管理后台用） ============
+  # nginx:
+  #   image: nginx:alpine
+  #   container_name: tg-search-bot-nginx
+  #   restart: unless-stopped
+  #   ports:
+  #     - "80:80"
+  #     - "443:443"
+  #   volumes:
+  #     - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+  #     # - ./ssl:/etc/nginx/ssl:ro  # HTTPS证书
+  #   depends_on:
+  #     - admin
+  #   networks:
+  #     - tg-bot-net
+
+# ============================================================
+# 备份服务：定时备份数据库到 ./data/backups + 可选同步到对象存储
+# 单独运行：docker compose run backup
+# ============================================================
+  backup:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: tg-search-bot:latest
+    container_name: tg-search-bot-backup
+    # 不随主服务启动，只手工或配合ofelia/宿主机cron执行
+    profiles: ["tools"]
+    environment:
+      - TZ=Asia/Shanghai
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./.env:/app/.env:ro
+    entrypoint: ["python", "-c"]
+    command:
+      - |
+        import asyncio
+        from app.admin.backup_manager import backup_manager
+        async def main():
+            result = await backup_manager.create_backup('scheduled', 'Docker定时备份')
+            print(f"备份结果: {result}")
+            await backup_manager.cleanup_old_backups()
+            print(f"清理旧备份完成，保留最近{backup_manager.keep_count}份")
+        asyncio.run(main())
+    networks:
+      - tg-bot-net
+
+# ============================================================
+# 充值检查服务：每5分钟检查USDT充值到账（第2步启用）
+# ============================================================
+  check-recharge:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: tg-search-bot:latest
+    container_name: tg-search-bot-recharge-checker
+    profiles: ["tools"]
+    environment:
+      - TZ=Asia/Shanghai
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./.env:/app/.env:ro
+    entrypoint: ["python", "-c"]
+    command:
+      - |
+        import asyncio
+        from app.wallet.wallet_manager import wallet_manager
+        async def main():
+            result = await wallet_manager.check_all_pending_recharges()
+            if result:
+                print(f"处理充值记录数: {len(result)}")
+                for r in result:
+                    print(f"  - 用户{r['user_id']}: {r['amount']}USDT -> 订单{r['order_id']}")
+            else:
+                print("无待处理充值")
+        asyncio.run(main())
+    networks:
+      - tg-bot-net
+
+# ============ 网络配置 ============
+networks:
+  tg-bot-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16

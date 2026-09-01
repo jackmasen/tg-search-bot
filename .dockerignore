@@ -1,0 +1,68 @@
+# ============================================================
+# Docker忽略文件 - 减少镜像构建上下文体积
+# ============================================================
+
+# Python缓存
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# 虚拟环境
+venv/
+env/
+ENV/
+.venv/
+
+# 数据文件（重要！不要打进镜像，通过volume挂载）
+data/
+*.db
+*.sqlite
+*.sqlite3
+*.session
+*.session-journal
+
+# 日志
+logs/
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 系统
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# 测试
+tests/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# 文档
+*.md
+docs/
+
+# 部署脚本（不需要进镜像，通过volume挂载）
+deploy/
+scripts/
+
+# 本地配置
+.env
+.env.local
+.env.production
