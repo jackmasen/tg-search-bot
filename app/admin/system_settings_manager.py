@@ -303,13 +303,25 @@ def decode_value(raw: str, value_type: str) -> Any:
 
 # ---------- 读写 DB ----------
 async def load_all_settings_from_db(db) -> Dict[str, Any]:
-    """从 system_settings 加载所有配置（返回已解码的 dict）"""
+    """从 system_settings 加载所有配置（返回已解码的 dict）
+
+    关键：CRYPTO_SECRET 本身不加密（value_type=str, is_encrypted=0），
+    所以必须先单独取出它，再用于解密其他加密字段。
+    """
     from app.config import Config as _C
 
-    crypto_secret = _C.CRYPTO_SECRET or "fallback_no_secret_2024"
     rows = await db.execute_fetchall(
         "SELECT setting_key, setting_value, value_type, is_encrypted FROM system_settings"
     )
+    # 第一遍：先提取 CRYPTO_SECRET（它本身不加密，是解密的密钥）
+    crypto_secret = _C.CRYPTO_SECRET or "fallback_no_secret_2024"
+    for r in rows:
+        if r["setting_key"] == "CRYPTO_SECRET" and not r["is_encrypted"]:
+            v = decode_value(r["setting_value"] or "", r["value_type"])
+            if v:
+                crypto_secret = str(v)
+            break
+
     out: Dict[str, Any] = {}
     for r in rows:
         key = r["setting_key"]
@@ -320,7 +332,6 @@ async def load_all_settings_from_db(db) -> Dict[str, Any]:
             try:
                 raw = _decrypt(raw, crypto_secret)
             except Exception:
-                # 尝试用默认 fallback 密钥解密
                 try:
                     raw = _decrypt(raw, "fallback_no_secret_2024")
                 except Exception:
