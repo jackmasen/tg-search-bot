@@ -556,6 +556,36 @@ input:focus, select:focus, textarea:focus { outline:none; border-color:#38bdf8; 
           </div>
         </div>
 
+        <!-- GitHub 一键更新 -->
+        <div class="card rounded-xl p-5 mb-5">
+          <div class="flex items-center justify-between mb-4">
+            <div class="text-sm font-semibold">🐙 GitHub 一键更新 <span class="text-xs text-slate-400 font-normal ml-1">（自动备份 → git pull → 失败自动回滚）</span></div>
+            <div id="git-update-status" class="text-xs text-slate-400">点击「检查更新」获取状态</div>
+          </div>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="border border-slate-700 rounded-xl p-4">
+              <div class="text-xs font-semibold mb-3">📥 拉取更新</div>
+              <div id="git-check-result" class="text-xs text-slate-300 mb-3 min-h-[60px]">
+                请先点击「🔍 检查更新」查看是否有新版本
+              </div>
+              <div class="flex gap-2">
+                <button onclick="checkGitUpdate()" class="btn-primary flex-1 !py-2 text-sm">🔍 检查更新</button>
+                <button onclick="performGitUpdate()" class="btn-warn flex-1 !py-2 text-sm" id="btn-git-update">🚀 一键更新</button>
+              </div>
+              <div id="git-update-result" class="text-xs mt-3 space-y-1"></div>
+            </div>
+            <div class="border border-slate-700 rounded-xl p-4">
+              <div class="flex items-center justify-between mb-3">
+                <div class="text-xs font-semibold">📜 Git 更新历史</div>
+                <button onclick="loadGitHistory()" class="text-xs text-sky-400 hover:text-sky-300">刷新</button>
+              </div>
+              <div id="git-history-list" class="text-xs text-slate-400 max-h-[180px] overflow-y-auto space-y-1">
+                点「刷新」加载更新记录
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- 版本管理：上传/备份/回滚 -->
         <div class="card rounded-xl p-5 mb-5">
           <div class="flex items-center justify-between mb-4">
@@ -3309,6 +3339,77 @@ async function restartBot(){
   const hint = r.hint ? `<div class="text-slate-400 mt-2">${r.hint}</div>` : '';
   if(out) out.innerHTML = lines.join('') + hint;
   toast('✅ 重启指令已发送', 'success');
+}
+// ── GitHub 一键更新 ─────────────────────────────────────────────────────
+async function checkGitUpdate(){
+  const out = document.getElementById('git-check-result');
+  const status = document.getElementById('git-update-status');
+  const btn = document.getElementById('btn-git-update');
+  if(out) out.innerHTML = '<span class="text-amber-300">🔄 正在检查...</span>';
+  if(status) status.textContent = '检查中...';
+  const r = await adminFetch('/api/admin/ops/git_check_update', {}, 'GET', 30000);
+  if(!r || !r.ok){
+    if(out) out.innerHTML = `<span class="text-rose-300">❌ ${r?.error||'检查失败'}</span>`;
+    if(status) status.textContent = '检查失败';
+    return;
+  }
+  if(status) status.textContent = `当前: v${r.current_version||'?'} · 远程: ${r.latest_commit?.slice(0,7)||''}`;
+  if(r.has_update){
+    const rows = r.behind_commits||0;
+    const msg = r.latest_message||'';
+    if(out) out.innerHTML = `
+      <div class="text-amber-300 font-semibold mb-1">🆕 发现新版本！落后 ${rows} 个 commit</div>
+      <div class="text-slate-300">${msg}</div>
+      <div class="text-slate-500 mt-1">最新: ${r.latest_commit?.slice(0,7)||''} · ${r.latest_date||''}</div>
+      <div class="text-sky-300 mt-1">提示：点击「🚀 一键更新」将自动备份 DB 并拉取代码</div>`;
+  } else {
+    if(out) out.innerHTML = `<span class="text-emerald-300">✅ 已是最新版本，无需更新</span>`;
+  }
+}
+async function performGitUpdate(){
+  if(!confirm('确认从 GitHub 拉取最新代码？\n\n流程：自动备份 DB → git pull → 安装依赖 → 重启服务\n更新失败将自动回滚到备份。')) return;
+  const btn = document.getElementById('btn-git-update');
+  const out = document.getElementById('git-update-result');
+  const status = document.getElementById('git-update-status');
+  if(btn){ btn.disabled = true; btn.textContent = '⏳ 更新中...'; btn.style.opacity = '0.5'; }
+  if(out) out.innerHTML = '<div class="text-amber-300">🔄 正在备份数据库...</div>';
+  const r = await adminFetch('/api/admin/ops/git_update', {}, 'POST', 180000);
+  if(btn){ btn.disabled = false; btn.textContent = '🚀 一键更新'; btn.style.opacity = ''; }
+  if(!r || !r.ok){
+    if(out) out.innerHTML = `<div class="text-rose-300">❌ 更新失败：${r.error||'未知错误'}</div>`;
+    if(status) status.textContent = '更新失败';
+    toast('❌ 更新失败', 'error');
+    return;
+  }
+  const lines = [];
+  if(r.backup_id) lines.push(`<div class="text-emerald-300">✅ 更新前 DB 已备份（ID: ${r.backup_id}）</div>`);
+  lines.push(`<div class="text-emerald-300">✅ 更新成功：v${r.old_version||'?'} → v${r.new_version||'?'}</div>`);
+  if(r.need_restart) lines.push(`<div class="text-sky-300">⏭ 需要重启服务生效，请点「🔄 重启 Bot 服务」</div>`);
+  if(out) out.innerHTML = lines.join('');
+  if(status) status.textContent = `已更新至 v${r.new_version||'?'}`;
+  toast('✅ 更新成功', 'success');
+  loadGitHistory();
+}
+async function loadGitHistory(){
+  const el = document.getElementById('git-history-list');
+  if(!el) return;
+  el.innerHTML = '<div class="text-slate-500">加载中...</div>';
+  const r = await adminFetch('/api/admin/ops/git_version_history', {}, 'GET', 15000);
+  if(!r || !r.ok || !r.history?.length){
+    el.innerHTML = '<div class="text-slate-500">暂无更新记录</div>';
+    return;
+  }
+  el.innerHTML = r.history.map(h => {
+    const sc = h.status==='active' ? 'text-emerald-300' :
+               h.status==='replaced' ? 'text-slate-400' :
+               h.status==='rolled_back' ? 'text-rose-300' : 'text-amber-300';
+    return `<div class="flex gap-2 border-b border-slate-800 pb-1">
+      <span class="font-mono text-sky-300 shrink-0">${h.version||'?'}</span>
+      <span class="${sc} shrink-0">[${h.status||'?'}]</span>
+      <span class="text-slate-400">${h.updated_at||''}</span>
+      <span class="text-slate-500">${h.notes||''}</span>
+    </div>`;
+  }).join('');
 }
 async function loadVersions(){
   const r = await adminFetch('/api/admin/ops/versions');

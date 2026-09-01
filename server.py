@@ -3705,6 +3705,55 @@ async def api_admin_ops_restart_bot(request: Request):
 
 
 # =========================================================================
+# Git 一键更新 API
+# =========================================================================
+
+@app.get("/api/admin/ops/git_check_update")
+async def api_admin_ops_git_check_update(request: Request):
+    """检查是否有新版本（git fetch + 比较 commit）"""
+    if not _verify_admin_session(str(request.headers.get("x-session-id", ""))):
+        return JSONResponse({"ok": False, "error": "未登录"}, status_code=401)
+    try:
+        from app.admin.version_manager import version_manager
+        r = await version_manager.check_update()
+        r["ok"] = True
+        return JSONResponse(r)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/admin/ops/git_update")
+async def api_admin_ops_git_update(request: Request):
+    """一键 Git 更新：备份 → git pull → 记录版本 → 失败自动回滚"""
+    try:
+        p = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "格式错误"}, status_code=400)
+    if not _verify_admin_session(str(p.get("session_id", ""))):
+        return JSONResponse({"ok": False, "error": "未登录"}, status_code=401)
+    try:
+        from app.admin.version_manager import version_manager
+        r = await version_manager.perform_update(auto_rollback=True)
+        r["ok"] = r.pop("success", True)
+        return JSONResponse(r)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/admin/ops/git_version_history")
+async def api_admin_ops_git_version_history(request: Request):
+    """获取版本更新历史"""
+    if not _verify_admin_session(str(request.query_params.get("session_id", ""))):
+        return JSONResponse({"ok": False, "error": "未登录"}, status_code=401)
+    try:
+        from app.admin.version_manager import version_manager
+        history = await version_manager.get_version_history(limit=20)
+        return JSONResponse({"ok": True, "history": history})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+# =========================================================================
 # 机器人前端 API（与 demo_server.py 保持一致）
 # =========================================================================
 async def search_messages(keyword: str, limit=5):

@@ -62,6 +62,7 @@ class VersionManager:
 
             return {
                 "has_update": behind_count > 0,
+                "current_version": Config.APP_VERSION,
                 "behind_commits": behind_count,
                 "latest_commit": latest_info[0] if len(latest_info) > 0 else "",
                 "latest_message": latest_info[1] if len(latest_info) > 1 else "",
