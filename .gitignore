@@ -1,0 +1,119 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Environment variables (contains secrets!)
+.env
+.env.local
+.env.production
+!.env.example
+
+# Sensitive data
+data/sessions/
+data/backups/
+data/*.db
+data/*.db-journal
+*.session
+*.session-journal
+
+# Logs
+logs/
+*.log
+server_err.log
+server_out.log
+server_stderr.log
+server_stdout.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Debug/temp scripts (development only)
+_check_js.py
+_demo_walkthrough.py
+_demo_walkthrough_2.py
+_query_menus.py
+check_admin.py
+check_decrypt.py
+check_js.js
+check_js_demo.js
+check_js_syntax.py
+check_nodejs.py
+check_served_html.py
+debug_catch.py
+debug_catch2.py
+demo_server.py
+extract_scripts.py
+find_error_line.py
+find_error_node.py
+find_style_error.py
+find_syntax_error.py
+fix_ad_schema.py
+fix_settings_table.py
+inspect_js.py
+inspect_served.py
+oneclick.sh
+restore_and_check.py
+served_scripts.json
+setup_admin.py
+survey_apis.py
+survey_db.py
+survey_routes.py
+test_ad_apis.py
+test_full.py
+test_page.py
+test_write.txt
+trace_login.py
+verify_ad_crud.py
+verify_e2e_ads.py
+verify_e2e_ads_crawler.py
+verify_fields.py
+verify_pause.py
+verify_phase2c3.py
+verify_resume.py
+write_admin_credentials.py
+_package_source.py
+
+# Backup files
+*.bak
+*.bak.*
+
+# Package files
+*.zip
+*.tar.gz
+*.tgz
+
+# Deployment docs (keep these)
+# DEPLOY_GUIDE_v1.0.2.txt
+# RELEASE_NOTES_v1.0.2.txt
+# TG搜索机器人-宝塔部署教程.md
+# 宝塔部署教程_v1.0.12.md
+# 宝塔部署指南_v1.0.3.md
