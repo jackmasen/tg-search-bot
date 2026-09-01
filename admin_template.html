@@ -554,6 +554,22 @@ input:focus, select:focus, textarea:focus { outline:none; border-color:#38bdf8; 
             <button id="btn-restart-bot" onclick="restartBot()" class="btn-rose w-full !py-2 text-sm">🔄 重启 Bot 服务</button>
             <div id="restart-bot-result" class="text-xs mt-3 space-y-1"></div>
           </div>
+
+          <!-- 手动推送测试 -->
+          <div class="card rounded-xl p-5">
+            <div class="text-sm font-semibold mb-2">📤 手动推送测试</div>
+            <div class="text-xs text-slate-400 mb-4">向管理员 Telegram 发送测试消息，验证 Bot 消息通道是否正常</div>
+            <button id="btn-bot-push" onclick="botPushTest()" class="btn-sky w-full !py-2 text-sm">📤 发送测试消息</button>
+            <div id="bot-push-result" class="text-xs mt-3 space-y-1"></div>
+          </div>
+
+          <!-- 修复 Telethon 账号池 -->
+          <div class="card rounded-xl p-5">
+            <div class="text-sm font-semibold mb-2">🔧 修复账号池配置</div>
+            <div class="text-xs text-slate-400 mb-4">自动对齐 TELETHON_API_IDS / API_HASHS / PHONES 三组条数（取最小值截断），解决「三组配置数量不一致」报错</div>
+            <button id="btn-fix-telethon" onclick="fixTelethonConfig()" class="btn-amber w-full !py-2 text-sm">🔧 一键修复</button>
+            <div id="fix-telethon-result" class="text-xs mt-3 space-y-1"></div>
+          </div>
         </div>
 
         <!-- GitHub 一键更新 -->
@@ -3369,6 +3385,32 @@ async function botPushTest(){
     : `<div class="text-slate-400 mt-2">⚠️ 未成功推送任何消息，请检查配置</div>`;
   if(out) out.innerHTML = lines.join('') + hint;
   toast(r.sent_count > 0 ? '✅ 推送成功，请查看 Telegram' : '⚠️ 推送无成功结果', r.sent_count > 0 ? 'success' : 'warning');
+}
+async function fixTelethonConfig(){
+  const btn = document.getElementById('btn-fix-telethon');
+  if(btn){ btn.disabled = true; btn.style.opacity = '0.5'; btn.style.pointerEvents = 'none'; btn.textContent = '⏳ 修复中...'; }
+  const out = document.getElementById('fix-telethon-result');
+  if(out) out.innerHTML = '<div class="text-amber-300">🔧 正在对齐三组配置...</div>';
+  const r = await adminFetch('/api/admin/ops/fix_telethon_config', {}, 'POST');
+  if(btn){ btn.disabled = false; btn.style.opacity = ''; btn.style.pointerEvents = ''; btn.textContent = '🔧 一键修复'; }
+  if(!r){
+    toast('❌ 请求失败', 'error');
+    if(out) out.innerHTML = '<div class="text-rose-300">❌ 请求失败</div>';
+    return;
+  }
+  if(!r.ok){
+    toast('❌ ' + (r.error||'修复失败'), 'error');
+    if(out) out.innerHTML = `<div class="text-rose-300">❌ ${r.error||'修复失败'}</div>`;
+    return;
+  }
+  let html = `<div class="text-emerald-300">✅ ${r.message}</div>`;
+  if(r.before){
+    html += `<div class="text-slate-400 mt-1">修复前：API_IDS=${r.before.ids} / API_HASHS=${r.before.hashes} / PHONES=${r.before.phones}</div>`;
+    html += `<div class="text-slate-400">修复后：三组均对齐至 ${r.after.ids} 组</div>`;
+    html += `<div class="text-amber-300 mt-2">⚠️ 截断的多余配置已保留原值，如需删除请手动在【系统配置】→【采集账号池】中修改</div>`;
+  }
+  if(out) out.innerHTML = html;
+  toast('✅ 账号池配置已修复，请重启 Bot 服务使配置生效', 'success');
 }
 // ── GitHub 一键更新 ─────────────────────────────────────────────────────
 async function checkGitUpdate(){

@@ -3750,6 +3750,54 @@ async def api_admin_ops_bot_push_test(request: Request):
 
 
 # =========================================================================
+# 修复 Telethon 账号池配置（三组数量不一致时自动对齐）
+# =========================================================================
+
+@app.post("/api/admin/ops/fix_telethon_config")
+async def api_admin_ops_fix_telethon_config(request: Request):
+    """自动对齐 TELETHON_API_IDS / TELETHON_API_HASHS / TELETHON_PHONES 三组配置条数"""
+    try:
+        p = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "格式错误"}, status_code=400)
+    if not _verify_admin_session(str(p.get("session_id", ""))):
+        return JSONResponse({"ok": False, "error": "未登录"}, status_code=401)
+    try:
+        from app.admin.system_settings_manager import load_all_settings_from_db, upsert_setting
+        async with get_db() as db:
+            settings = await load_all_settings_from_db(db)
+        ids_raw  = settings.get("TELETHON_API_IDS", "")
+        hashes_raw = settings.get("TELETHON_API_HASHS", "")
+        phones_raw = settings.get("TELETHON_PHONES", "")
+        ids_list  = [x for x in str(ids_raw).split(",") if x.strip()] if ids_raw else []
+        hashes_list = [x for x in str(hashes_raw).split(",") if x.strip()] if hashes_raw else []
+        phones_list = [x for x in str(phones_raw).split(",") if x.strip()] if phones_raw else []
+        before_ids  = len(ids_list)
+        before_hashes = len(hashes_list)
+        before_phones = len(phones_list)
+        if before_ids == before_hashes == before_phones:
+            return JSONResponse({"ok": True, "message": "三组配置条数一致，无需修复",
+                                "ids": before_ids, "hashes": before_hashes, "phones": before_phones})
+        new_len = min(before_ids, before_hashes, before_phones)
+        if new_len == 0:
+            return JSONResponse({"ok": False, "error": "三组配置均为空，请先在【系统配置】→【采集账号池】中填写账号"}, status_code=400)
+        ids_list_new  = ids_list[:new_len]
+        hashes_list_new = hashes_list[:new_len]
+        phones_list_new = phones_list[:new_len]
+        await upsert_setting(db, "TELETHON_API_IDS", ",".join(ids_list_new))
+        await upsert_setting(db, "TELETHON_API_HASHS", ",".join(hashes_list_new))
+        await upsert_setting(db, "TELETHON_PHONES", ",".join(phones_list_new))
+        return JSONResponse({
+            "ok": True,
+            "message": f"已对齐至 {new_len} 组（取最小值）",
+            "before": {"ids": before_ids, "hashes": before_hashes, "phones": before_phones},
+            "after":  {"ids": new_len, "hashes": new_len, "phones": new_len},
+        })
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+# =========================================================================
 # Git 一键更新 API
 # =========================================================================
 
