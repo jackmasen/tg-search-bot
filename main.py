@@ -63,6 +63,9 @@ def setup_logging():
 
 async def post_init(app: Application):
     """Bot启动后的初始化（在事件循环中执行）"""
+    logger.info("加载数据库配置...")
+    await _load_config_from_db()
+
     logger.info("初始化数据库...")
     await init_db()
 
@@ -79,15 +82,6 @@ def main():
     """主入口"""
     os.makedirs(Config.LOG_DIR, exist_ok=True)
     setup_logging()
-
-    # 使用单一事件循环完成所有初始化（DB建表 + 加载DB配置）
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        loop.run_until_complete(init_db())
-        loop.run_until_complete(_load_config_from_db())
-    finally:
-        loop.close()
 
     # 校验配置
     try:
