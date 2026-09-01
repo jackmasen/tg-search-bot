@@ -3705,6 +3705,51 @@ async def api_admin_ops_restart_bot(request: Request):
 
 
 # =========================================================================
+# 手动推送测试（向管理员发送测试消息，验证 Bot 通道是否正常）
+# =========================================================================
+
+@app.post("/api/admin/ops/bot_push_test")
+async def api_admin_ops_bot_push_test(request: Request):
+    """向管理员发送一条测试消息，验证 Bot 通道是否正常"""
+    try:
+        p = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "格式错误"}, status_code=400)
+    if not _verify_admin_session(str(p.get("session_id", ""))):
+        return JSONResponse({"ok": False, "error": "未登录"}, status_code=401)
+    token = Config.BOT_TOKEN
+    if not token:
+        return JSONResponse({"ok": False, "error": "TG_BOT_TOKEN 未配置，请先在后台【系统配置】→【机器人配置】中填写"}, status_code=400)
+    import httpx as _hx
+    admins = Config.ADMIN_TG_IDS or []
+    if not admins:
+        return JSONResponse({"ok": False, "error": "ADMIN_TG_IDS 未配置，请先在后台【系统配置】→【机器人配置】中填写"}, status_code=400)
+    now_str = __import__('datetime').datetime.now().strftime("%H:%M:%S")
+    msg = f"🔔 后台手动推送测试\n⏰ {now_str}\n\n✅ Bot 消息通道正常！请查看 Telegram。"
+    results = []
+    ok_count = 0
+    try:
+        async with _hx.AsyncClient(timeout=_hx.Timeout(15.0, connect=8.0)) as client:
+            for uid in admins:
+                try:
+                    r = await client.post(
+                        f"https://api.telegram.org/bot{token}/sendMessage",
+                        json={"chat_id": int(uid), "text": msg, "parse_mode": "HTML"},
+                    )
+                    data = r.json()
+                    if data.get("ok"):
+                        ok_count += 1
+                        results.append(f"✅ 推送至管理员 {uid} 成功")
+                    else:
+                        results.append(f"⚠️ 推送至 {uid} 失败：{data.get('description','')}")
+                except Exception as e:
+                    results.append(f"❌ 推送至 {uid} 异常：{str(e)[:60]}")
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": f"HTTP 请求失败：{str(e)[:100]}"}, status_code=500)
+    return JSONResponse({"ok": ok_count > 0, "sent_count": ok_count, "results": results})
+
+
+# =========================================================================
 # Git 一键更新 API
 # =========================================================================
 

@@ -3340,6 +3340,36 @@ async function restartBot(){
   if(out) out.innerHTML = lines.join('') + hint;
   toast('✅ 重启指令已发送', 'success');
 }
+async function botPushTest(){
+  const btn = document.getElementById('btn-bot-push');
+  if(btn){ btn.disabled = true; btn.style.opacity = '0.5'; btn.style.pointerEvents = 'none'; btn.textContent = '⏳ 发送中...'; }
+  const out = document.getElementById('bot-push-result');
+  if(out) out.innerHTML = '<div class="text-amber-300">📤 正在发送测试消息...</div>';
+  const r = await adminFetch('/api/admin/ops/bot_push_test', {}, 'POST');
+  if(btn){ btn.disabled = false; btn.style.opacity = ''; btn.style.pointerEvents = ''; btn.textContent = '📤 发送测试消息'; }
+  if(!r){
+    toast('❌ 请求失败', 'error');
+    if(out) out.innerHTML = '<div class="text-rose-300">❌ 请求失败</div>';
+    return;
+  }
+  if(!r.ok){
+    toast('❌ ' + (r.error||'发送失败'), 'error');
+    if(out) out.innerHTML = `<div class="text-rose-300">❌ ${r.error||'发送失败'}</div>`;
+    return;
+  }
+  const lines = (r.results||[]).map(x =>
+    x.startsWith('✅')
+      ? `<div class="text-emerald-300">${x}</div>`
+      : x.startsWith('❌')
+        ? `<div class="text-rose-300">${x}</div>`
+        : `<div class="text-amber-300">${x}</div>`
+  );
+  const hint = r.sent_count > 0
+    ? `<div class="text-slate-400 mt-2">✅ 已推送 ${r.sent_count} 条，请查看 Telegram</div>`
+    : `<div class="text-slate-400 mt-2">⚠️ 未成功推送任何消息，请检查配置</div>`;
+  if(out) out.innerHTML = lines.join('') + hint;
+  toast(r.sent_count > 0 ? '✅ 推送成功，请查看 Telegram' : '⚠️ 推送无成功结果', r.sent_count > 0 ? 'success' : 'warning');
+}
 // ── GitHub 一键更新 ─────────────────────────────────────────────────────
 async function checkGitUpdate(){
   const out = document.getElementById('git-check-result');
