@@ -26,6 +26,8 @@ from app.bot.handlers import (
     my_ads_command,
     ad_templates_command,
     ad_stats_command,
+    ai_search_command,
+    ai_command,
 )
 
 
@@ -110,6 +112,8 @@ def main():
     application.add_handler(CommandHandler("myads", my_ads_command))
     application.add_handler(CommandHandler("adtemplates", ad_templates_command))
     application.add_handler(CommandHandler("adstats", ad_stats_command))
+    application.add_handler(CommandHandler("aisearch", ai_search_command))
+    application.add_handler(CommandHandler("ai", ai_command))
 
     # 注册文本搜索（非命令消息）
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search_handler))

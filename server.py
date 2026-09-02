@@ -4612,6 +4612,107 @@ async def api_bot_myad_update(request: Request):
     return JSONResponse({"ok": result.get("success", False), "error": result.get("error")})
 
 
+# =========================================================================
+# AI 智能搜索 API
+# =========================================================================
+
+@app.get("/api/admin/ai/config")
+async def api_admin_ai_config(request: Request):
+    """获取 AI 配置状态"""
+    session_id = request.query_params.get("session_id", "")
+    if not _verify_admin_session(session_id):
+        return JSONResponse({"ok": False, "error": "未登录"}, status_code=401)
+    try:
+        from app.ai.model_service import ai_service
+        from app.ai.settings_manager import get_ai_settings, get_ai_search_stats
+        from app.config import Config
+
+        is_configured = ai_service.is_configured()
+        stats = await get_ai_search_stats(limit=30)
+
+        return JSONResponse({
+            "ok": True,
+            "configured": is_configured,
+            "config": {
+                "provider": Config.AI_PROVIDER,
+                "api_base": Config.AI_API_BASE,
+                "api_key_set": bool(Config.AI_API_KEY),
+                "model": Config.AI_MODEL,
+                "max_tokens": Config.AI_MAX_TOKENS,
+                "temperature": Config.AI_TEMPERATURE,
+                "keyword_expand": Config.AI_KEYWORD_EXPAND,
+                "summarize_results": Config.AI_SUMMARIZE_RESULTS,
+                "free_daily_limit": Config.AI_FREE_DAILY_LIMIT,
+            },
+            "stats": stats,
+        })
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)[:200]})
+
+
+@app.post("/api/admin/ai/config/save")
+async def api_admin_ai_config_save(request: Request):
+    """保存 AI 配置"""
+    try:
+        p = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "格式错误"}, status_code=400)
+    session_id = p.get("session_id", "")
+    if not _verify_admin_session(session_id):
+        return JSONResponse({"ok": False, "error": "未登录"}, status_code=401)
+
+    from app.ai.settings_manager import batch_save_ai_settings
+    from app.config import Config as _C
+
+    payload = p.get("config", {})
+    if not isinstance(payload, dict):
+        return JSONResponse({"ok": False, "error": "config 必须是对象"}, status_code=400)
+
+    try:
+        async with get_db() as db:
+            result = await batch_save_ai_settings(db, payload)
+        # 立即应用到内存 Config
+        _C.apply_overrides(payload)
+        return JSONResponse({"ok": True, "saved": result})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)[:200]})
+
+
+@app.get("/api/admin/ai/stats")
+async def api_admin_ai_stats(request: Request):
+    """获取 AI 使用统计"""
+    session_id = request.query_params.get("session_id", "")
+    if not _verify_admin_session(session_id):
+        return JSONResponse({"ok": False, "error": "未登录"}, status_code=401)
+    try:
+        from app.ai.settings_manager import get_ai_search_stats, get_today_ai_usage
+        stats = await get_ai_search_stats(limit=100)
+        today_usage = await get_today_ai_usage(None)  # 全用户汇总
+        return JSONResponse({"ok": True, "stats": stats, "today_usage": today_usage})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)[:200]})
+
+
+@app.get("/api/bot/ai/usage")
+async def api_bot_ai_usage(request: Request):
+    """用户查询自己的 AI 使用次数"""
+    user_id = request.query_params.get("user_id", "")
+    if not user_id:
+        return JSONResponse({"ok": False, "error": "缺少 user_id"}, status_code=400)
+    try:
+        from app.ai.settings_manager import get_today_ai_usage
+        usage = await get_today_ai_usage(int(user_id))
+        free_limit = Config.AI_FREE_DAILY_LIMIT
+        return JSONResponse({
+            "ok": True,
+            "today_count": usage,
+            "daily_limit": free_limit,
+            "remaining": max(0, free_limit - usage) if free_limit > 0 else -1,
+        })
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)[:200]})
+
+
 if __name__ == "__main__":
     import asyncio
     print("=" * 60)

@@ -1,6 +1,6 @@
 """
 Bot命令处理器（第1步+第2步）
-搜索 + USDT充值 + 广告合作
+搜索 + USDT充值 + 广告合作 + AI智能搜索
 """
 from datetime import datetime, date
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -410,3 +410,189 @@ async def search_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_text += f"\n💡 剩余搜索：{remaining}/{Config.FREE_SEARCH_DAILY_LIMIT}"
 
     await update.message.reply_text(reply_text, parse_mode="Markdown", disable_web_page_preview=True)
+
+
+# ============ AI 智能搜索 ============
+_user_ai_count: dict = {}
+
+
+async def ai_search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/aisearch 命令 - AI 智能搜索"""
+    if not context.args:
+        await update.message.reply_text(
+            "🤖 **AI 智能搜索**\n\n"
+            "用法：`/aisearch 你的问题`\n\n"
+            "示例：\n"
+            "• `/aisearch 最近有什么热门频道`\n"
+            "• `/aisearch 帮我总结比特币相关内容`\n\n"
+            "AI 会自动扩展关键词并生成智能摘要"
+        )
+        return
+
+    keyword = " ".join(context.args).strip()
+    if len(keyword) < 2:
+        await update.message.reply_text("⚠️ 请输入至少2个字符的问题")
+        return
+
+    user_id = update.effective_user.id
+    today = date.today()
+    ai_stat = _user_ai_count.get(user_id, {"count": 0, "date": today})
+    if ai_stat["date"] != today:
+        ai_stat = {"count": 0, "date": today}
+
+    free_limit = Config.AI_FREE_DAILY_LIMIT
+    if free_limit > 0 and ai_stat["count"] >= free_limit:
+        await update.message.reply_text(
+            f"⚠️ 今日 AI 搜索次数已用完（{free_limit}次）\n"
+            "明日重置或联系管理员开通更多次数"
+        )
+        return
+
+    thinking_msg = await update.message.reply_text(f"🤖 AI 正在分析：`{keyword}` ...")
+
+    try:
+        from app.ai.model_service import ai_service
+        from app.ai.settings_manager import record_ai_usage
+
+        if not ai_service.is_configured():
+            await thinking_msg.edit_text(
+                "⚠️ AI 搜索功能尚未配置\n"
+                "请联系管理员在后台配置 AI API Key"
+            )
+            return
+
+        # 构建上下文：先用传统搜索获取结果
+        search_results = await searcher.search(keyword)
+        context_text = ""
+        if search_results:
+            for i, item in enumerate(search_results[:10], 1):
+                channel = item.get("channel_title") or item.get("channel_username") or "未知"
+                excerpt = item.get("excerpt") or ""
+                date_str = item.get("msg_date", "")[:10] if item.get("msg_date") else ""
+                context_text += f"{i}. [{channel}] {date_str}\n   {excerpt}\n\n"
+
+        # AI 智能搜索
+        if context_text and Config.AI_SUMMARIZE_RESULTS:
+            result = await ai_service.smart_search(keyword, search_results)
+        else:
+            result = await ai_service.chat(keyword, context_text)
+
+        content = result.get("content", "AI 未返回内容")
+        model_name = result.get("model", "unknown")
+        input_tokens = result.get("input_tokens", 0)
+        output_tokens = result.get("output_tokens", 0)
+
+        # 记录用量
+        try:
+            await record_ai_usage(user_id, model_name, input_tokens, output_tokens)
+        except Exception:
+            pass
+
+        ai_stat["count"] += 1
+        _user_ai_count[user_id] = ai_stat
+
+        # 截断过长内容
+        if len(content) > 2000:
+            content = content[:1997] + "..."
+
+        remaining = free_limit - ai_stat["count"] if free_limit > 0 else "∞"
+        reply_text = (
+            f"🤖 **AI 搜索结果**\n\n"
+            f"💬 问题：`{keyword}`\n\n"
+            f"{content}\n\n"
+            f"──\n"
+            f"模型：{model_name} | "
+            f"消耗：{input_tokens + output_tokens} tokens | "
+            f"剩余 AI 次数：{remaining}"
+        )
+        await thinking_msg.edit_text(reply_text, parse_mode="Markdown")
+
+    except Exception as e:
+        logger.error(f"AI 搜索失败: {e}")
+        await thinking_msg.edit_text(f"❌ AI 搜索出错：{str(e)[:200]}")
+
+
+async def ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/ai 命令 - AI 对话"""
+    if not context.args:
+        await update.message.reply_text(
+            "🤖 **AI 对话助手**\n\n"
+            "用法：`/ai 你的问题`\n\n"
+            "AI 可以回答各类问题，结合知识库内容\n\n"
+            "示例：\n"
+            "• `/ai 今天有什么新闻`\n"
+            "• `/ai 什么是区块链`\n"
+            "• `/ai 帮我写一段Python代码`"
+        )
+        return
+
+    question = " ".join(context.args).strip()
+    if len(question) < 2:
+        await update.message.reply_text("⚠️ 请输入至少2个字符的问题")
+        return
+
+    user_id = update.effective_user.id
+    today = date.today()
+    ai_stat = _user_ai_count.get(user_id, {"count": 0, "date": today})
+    if ai_stat["date"] != today:
+        ai_stat = {"count": 0, "date": today}
+
+    free_limit = Config.AI_FREE_DAILY_LIMIT
+    if free_limit > 0 and ai_stat["count"] >= free_limit:
+        await update.message.reply_text(
+            f"⚠️ 今日 AI 次数已用完（{free_limit}次）\n明日重置"
+        )
+        return
+
+    thinking_msg = await update.message.reply_text(f"🤖 AI 思考中：`{question}` ...")
+
+    try:
+        from app.ai.model_service import ai_service
+        from app.ai.settings_manager import record_ai_usage
+
+        if not ai_service.is_configured():
+            await thinking_msg.edit_text(
+                "⚠️ AI 功能尚未配置\n"
+                "请联系管理员配置 AI API Key"
+            )
+            return
+
+        # 用知识库内容作为上下文
+        search_results = await searcher.search(question[:30])
+        context_text = ""
+        if search_results:
+            for i, item in enumerate(search_results[:5], 1):
+                channel = item.get("channel_title") or item.get("channel_username") or "未知"
+                excerpt = item.get("excerpt") or ""
+                context_text += f"{i}. [{channel}] {excerpt}\n"
+
+        result = await ai_service.chat(question, context_text)
+        content = result.get("content", "AI 未返回内容")
+        model_name = result.get("model", "unknown")
+        input_tokens = result.get("input_tokens", 0)
+        output_tokens = result.get("output_tokens", 0)
+
+        try:
+            await record_ai_usage(user_id, model_name, input_tokens, output_tokens)
+        except Exception:
+            pass
+
+        ai_stat["count"] += 1
+        _user_ai_count[user_id] = ai_stat
+
+        if len(content) > 2000:
+            content = content[:1997] + "..."
+
+        remaining = free_limit - ai_stat["count"] if free_limit > 0 else "∞"
+        reply_text = (
+            f"🤖 **AI 回答**\n\n"
+            f"💬 {question}\n\n"
+            f"{content}\n\n"
+            f"──\n"
+            f"模型：{model_name} | 消耗：{input_tokens + output_tokens} tokens | 剩余：{remaining}"
+        )
+        await thinking_msg.edit_text(reply_text, parse_mode="Markdown")
+
+    except Exception as e:
+        logger.error(f"AI 对话失败: {e}")
+        await thinking_msg.edit_text(f"❌ AI 出错：{str(e)[:200]}")

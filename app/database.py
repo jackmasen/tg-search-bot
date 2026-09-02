@@ -227,7 +227,7 @@ CREATE TABLE IF NOT EXISTS hot_keyword_categories (
 CREATE INDEX IF NOT EXISTS idx_users_tg ON users(tg_user_id);
 CREATE INDEX IF NOT EXISTS idx_wallets_address ON wallets(address);
 CREATE INDEX IF NOT EXISTS idx_orders_status ON recharge_orders(status);
-CREATE INDEX IF NOT EXISTS idx_orders_address ON recharge_orders(address, status);
+CREATE INDEX IF NOT EXISTS idx_orders_address ON wallets(address, status);
 CREATE INDEX IF NOT EXISTS idx_tx_user ON transactions(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_campaigns_keyword ON ad_campaigns(keyword, status);
 CREATE INDEX IF NOT EXISTS idx_impressions_campaign ON ad_impressions(campaign_id, created_at DESC);
@@ -242,19 +242,27 @@ CREATE TABLE IF NOT EXISTS search_logs (
 CREATE INDEX IF NOT EXISTS idx_search_logs_user ON search_logs(tg_user_id, created_at DESC);
 
 -- 系统配置表（后台可修改的配置项，非密钥类）
--- 规则：
---   1. 仅存储非密钥类配置；密钥类必须保留在 .env 中
---   2. 启动优先级：DB 配置 > .env 配置 > 代码默认值
---   3. 敏感字段（如 API Hash / Token）写入前用 CRYPTO_SECRET AES 加密
 CREATE TABLE IF NOT EXISTS system_settings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    setting_key TEXT UNIQUE NOT NULL,           -- 配置键名（例如 TG_BOT_TOKEN / TELETHON_API_IDS / DEFAULT_CPC_PRICE）
-    setting_value TEXT,                         -- 配置值（字符串存储，复杂类型 JSON 序列化）
+    setting_key TEXT UNIQUE NOT NULL,           -- 配置键名
+    setting_value TEXT,                         -- 配置值
     value_type TEXT DEFAULT 'str',              -- 数据类型: str/int/float/bool/list_int/list_str/json
-    is_encrypted INTEGER DEFAULT 0,             -- 是否加密存储（API密钥、Token 类设1）
-    description TEXT,                           -- 配置说明（显示在后台）
+    is_encrypted INTEGER DEFAULT 0,             -- 是否加密存储
+    description TEXT,                           -- 配置说明
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- AI 搜索日志表（v1.0.22）
+CREATE TABLE IF NOT EXISTS ai_search_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tg_user_id INTEGER,
+    model_name TEXT,
+    input_tokens INTEGER DEFAULT 0,
+    output_tokens INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_ai_logs_user ON ai_search_logs(tg_user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ai_logs_date ON ai_search_logs(DATE(created_at));
 """
 
 
@@ -282,12 +290,13 @@ async def init_db():
         if "derivation_path" not in cols:
             await db.execute("ALTER TABLE wallets ADD COLUMN derivation_path TEXT")
 
-        # recharge_orders表补 actual_amount_usdt（实际转账金额，可能和应充金额略有不同）
+        # recharge_orders表补 actual_amount_usdt（实际转账金额）
         async with db.execute("PRAGMA table_info(recharge_orders)") as cur:
             cols = {row[1] for row in await cur.fetchall()}
         if "actual_amount_usdt" not in cols:
             await db.execute("ALTER TABLE recharge_orders ADD COLUMN actual_amount_usdt REAL")
-        # users表补 role 以外的预留字段（未来扩展）
+
+        # users表补新字段
         async with db.execute("PRAGMA table_info(users)") as cur:
             cols = {row[1] for row in await cur.fetchall()}
         if "is_advertiser" not in cols:
@@ -299,7 +308,7 @@ async def init_db():
             await db.execute("ALTER TABLE users ADD COLUMN invite_code TEXT")
             await db.execute("ALTER TABLE users ADD COLUMN invited_count INTEGER DEFAULT 0")
 
-        # ad_campaigns表补 display_order 和 is_featured 字段
+        # ad_campaigns表补字段
         async with db.execute("PRAGMA table_info(ad_campaigns)") as cur:
             cols = {row[1] for row in await cur.fetchall()}
         if "display_order" not in cols:
@@ -311,8 +320,6 @@ async def init_db():
         if "member_count" not in cols:
             await db.execute("ALTER TABLE ad_campaigns ADD COLUMN member_count INTEGER DEFAULT 10000")
         if "updated_at" not in cols:
-            # 注意：SQLite 部分版本不允许 ADD COLUMN 带 CURRENT_TIMESTAMP 默认值，
-            # 因此先加空列，历史记录回填当前时间；代码层 update/set 操作会显式维护 updated_at
             await db.execute("ALTER TABLE ad_campaigns ADD COLUMN updated_at TIMESTAMP")
             await db.execute("UPDATE ad_campaigns SET updated_at=COALESCE(created_at, CURRENT_TIMESTAMP) WHERE updated_at IS NULL")
 
@@ -372,6 +379,27 @@ async def init_db():
             await db.execute(
                 "INSERT OR IGNORE INTO hot_keywords (keyword, category, display_order, is_custom, is_active) VALUES (?,?,?,0,1)",
                 (kw, cat, order)
+            )
+
+        # 初始化 AI 默认配置
+        ai_defaults = [
+            ("AI_PROVIDER", "deepseek", "str", 0, "AI模型提供商", "deepseek/openai/custom"),
+            ("AI_API_BASE", "https://api.deepseek.com", "str", 0, "AI API Base URL", "OpenAI兼容接口地址"),
+            ("AI_API_KEY", "", "str", 1, "AI API Key", "从 DeepSeek/OpenAI 平台获取"),
+            ("AI_MODEL", "deepseek-chat", "str", 0, "默认AI模型", "deepseek-chat / deepseek-coder / gpt-4o"),
+            ("AI_MAX_TOKENS", "1024", "int", 0, "单次最大Token数", "输出最大Token限制"),
+            ("AI_TEMPERATURE", "0.7", "float", 0, "温度参数", "创造性程度，0-2，越高越有创意"),
+            ("AI_KEYWORD_EXPAND", "1", "bool", 0, "启用关键词扩展", "搜索时自动扩展相关关键词"),
+            ("AI_SUMMARIZE_RESULTS", "1", "bool", 0, "启用结果AI总结", "搜索结果自动生成摘要"),
+            ("AI_FREE_DAILY_LIMIT", "3", "int", 0, "免费用户每日AI次数", "0表示不限"),
+        ]
+        for key, value, vtype, encrypted, desc, hint in ai_defaults:
+            await db.execute(
+                """
+                INSERT OR IGNORE INTO system_settings (setting_key, setting_value, value_type, is_encrypted, description)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (key, value, vtype, encrypted, hint),
             )
 
         await db.commit()

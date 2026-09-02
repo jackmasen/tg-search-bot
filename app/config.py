@@ -80,6 +80,17 @@ class Config:
     SEARCH_RESULT_LIMIT: int = _safe_int(os.getenv("SEARCH_RESULT_LIMIT"), 20)
     FREE_SEARCH_DAILY_LIMIT: int = _safe_int(os.getenv("FREE_SEARCH_DAILY_LIMIT"), 5)
 
+    # ===== AI 智能搜索 =====
+    AI_PROVIDER: str = os.getenv("AI_PROVIDER", "deepseek")
+    AI_API_BASE: str = os.getenv("AI_API_BASE", "https://api.deepseek.com")
+    AI_API_KEY: str = os.getenv("AI_API_KEY", "")
+    AI_MODEL: str = os.getenv("AI_MODEL", "deepseek-chat")
+    AI_MAX_TOKENS: int = _safe_int(os.getenv("AI_MAX_TOKENS"), 1024)
+    AI_TEMPERATURE: float = _safe_float(os.getenv("AI_TEMPERATURE"), 0.7)
+    AI_KEYWORD_EXPAND: bool = os.getenv("AI_KEYWORD_EXPAND", "1") in ("1", "true", "yes")
+    AI_SUMMARIZE_RESULTS: bool = os.getenv("AI_SUMMARIZE_RESULTS", "1") in ("1", "true", "yes")
+    AI_FREE_DAILY_LIMIT: int = _safe_int(os.getenv("AI_FREE_DAILY_LIMIT"), 3)
+
     # ===== 前端展示数量 =====
     FEATURED_AD_LIMIT: int = _safe_int(os.getenv("FEATURED_AD_LIMIT"), 10)
     HOT_KEYWORD_PER_CATEGORY_LIMIT: int = _safe_int(os.getenv("HOT_KEYWORD_PER_CATEGORY_LIMIT"), 8)
@@ -128,7 +139,7 @@ class Config:
     MAX_DAILY_SPEND_USDT: float = _safe_float(os.getenv("MAX_DAILY_SPEND_USDT"), 0)
 
     # ===== 版本与备份 =====
-    APP_VERSION: str = "1.0.21"
+    APP_VERSION: str = "1.0.22"
     BACKUP_DIR: str = "./data/backups"
     BACKUP_KEEP_COUNT: int = 10  # 保留最近10份备份
     VERSION_REPO_URL: str = os.getenv("VERSION_REPO_URL", "")  # Git仓库地址，用于拉取更新
@@ -229,6 +240,15 @@ class Config:
             "LOG_DIR": cls.LOG_DIR,
             "LOG_LEVEL": cls.LOG_LEVEL,
             "VERSION_REPO_URL": cls.VERSION_REPO_URL,
+            "AI_PROVIDER": cls.AI_PROVIDER,
+            "AI_API_BASE": cls.AI_API_BASE,
+            "AI_API_KEY": cls.AI_API_KEY,
+            "AI_MODEL": cls.AI_MODEL,
+            "AI_MAX_TOKENS": cls.AI_MAX_TOKENS,
+            "AI_TEMPERATURE": cls.AI_TEMPERATURE,
+            "AI_KEYWORD_EXPAND": cls.AI_KEYWORD_EXPAND,
+            "AI_SUMMARIZE_RESULTS": cls.AI_SUMMARIZE_RESULTS,
+            "AI_FREE_DAILY_LIMIT": cls.AI_FREE_DAILY_LIMIT,
         }
 
     @classmethod
