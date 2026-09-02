@@ -409,6 +409,7 @@ async def startup_event():
     # 启动 AI 多模型定时健康检查后台任务
     asyncio.create_task(_start_ai_health_checker())
     print("[生产模式] AI 多模型健康检查后台任务已启动（每5分钟检测一次）")
+await _ai_health_check_cycle()
 
 
 # ============ 机器人前端页面（演示版同款聊天仿真界面） ============
@@ -4051,14 +4052,14 @@ async def api_bot_command(request: Request):
             ad_limit = Config.FEATURED_AD_LIMIT
             featured_ads = []
             async with get_db() as db:
-                cur = await db.execute(
-                    """SELECT * FROM channels
-                       WHERE is_featured = 1
-                       ORDER BY sort_order ASC, id ASC
-                       LIMIT ?""",
-                    (ad_limit,)
-                )
-                featured_ads = [dict(row) for row in await cur.fetchall()]
+        cur = await db.execute(
+            """SELECT * FROM channels
+                   WHERE is_featured = 1
+                   ORDER BY sort_order ASC, id ASC
+                   LIMIT ?""",
+            (ad_limit,)
+        )
+        featured_ads = [dict(row) for row in await cur.fetchall()]
 
             hot_keywords_by_cat = await ad_manager.get_hot_keywords_by_category()
 
