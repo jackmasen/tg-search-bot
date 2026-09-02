@@ -139,7 +139,7 @@ class Config:
     MAX_DAILY_SPEND_USDT: float = _safe_float(os.getenv("MAX_DAILY_SPEND_USDT"), 0)
 
     # ===== 版本与备份 =====
-    APP_VERSION: str = "1.0.24"
+    APP_VERSION: str = "1.0.25"
     BACKUP_DIR: str = "./data/backups"
     BACKUP_KEEP_COUNT: int = 10  # 保留最近10份备份
     VERSION_REPO_URL: str = os.getenv("VERSION_REPO_URL", "")  # Git仓库地址，用于拉取更新

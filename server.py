@@ -71,6 +71,10 @@ ADMIN_CREDENTIALS = {
 # 内存 session 管理（key=session_id, value=dict(username, expire_at)）
 ADMIN_SESSIONS = {}
 
+# AI 多模型健康状态缓存（定时任务写入，供前端轮询）
+_ai_health_status = {"last_check": None, "healthy_count": 0, "total_count": 0, "keys": [], "auto_switching": True}
+
+
 def _to_int(x, default=0):
     try:
         return int(x) if x not in (None, "") else default
@@ -328,6 +332,46 @@ async def init_production_db():
 app = FastAPI(title="TG搜索机器人 - 生产环境", version=Config.APP_VERSION)
 
 
+# =========================================================================
+# AI 多模型定时健康检查后台任务
+# =========================================================================
+_AI_HEALTH_INTERVAL = 300  # 每5分钟检测一次
+
+
+async def _ai_health_check_cycle():
+    """单次 AI 池健康检测，结果写入 _ai_health_status"""
+    global _ai_health_status
+    try:
+        from app.ai.model_service import ai_service
+        await ai_service.load_from_db()
+        result = await ai_service.health_check()
+        _ai_health_status = {
+            "last_check": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "healthy_count": result.get("healthy_count", 0),
+            "total_count": len(result.get("keys", [])),
+            "keys": result.get("keys", []),
+            "auto_switching": True,
+        }
+        logger = __import__("loguru").logger
+        logger.info(f"AI健康检测完成: {result.get('healthy_count')}/{len(result.get('keys', []))} 个可用")
+    except Exception as e:
+        _ai_health_status["last_check"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        _ai_health_status["error"] = str(e)[:100]
+        logger = __import__("loguru").logger
+        logger.warning(f"AI健康检测异常: {e}")
+
+
+async def _start_ai_health_checker():
+    """启动 AI 池定时健康检查后台任务（每5分钟）"""
+    while True:
+        try:
+            await _ai_health_check_cycle()
+        except Exception as e:
+            logger = __import__("loguru").logger
+            logger.warning(f"AI健康检查循环异常: {e}")
+        await asyncio.sleep(_AI_HEALTH_INTERVAL)
+
+
 @app.on_event("startup")
 async def startup_event():
     """服务启动时初始化"""
@@ -361,6 +405,10 @@ async def startup_event():
     print("[生产模式] 服务启动完成")
     print(f"[生产模式] 用户界面: http://127.0.0.1:8001")
     print(f"[生产模式] 管理后台: http://127.0.0.1:8001/admin")
+
+    # 启动 AI 多模型定时健康检查后台任务
+    asyncio.create_task(_start_ai_health_checker())
+    print("[生产模式] AI 多模型健康检查后台任务已启动（每5分钟检测一次）")
 
 
 # ============ 机器人前端页面（演示版同款聊天仿真界面） ============
@@ -4902,6 +4950,81 @@ async def api_bot_ai_usage(request: Request):
         })
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)[:200]})
+
+
+@app.get("/api/admin/ai/health/status")
+async def api_admin_ai_health_status(request: Request):
+    """获取 AI 池定时健康检查缓存状态（由后台任务每5分钟自动更新）"""
+    session_id = request.query_params.get("session_id", "")
+    if not _verify_admin_session(session_id):
+        return JSONResponse({"ok": False, "error": "未登录"}, status_code=401)
+    return JSONResponse({"ok": True, **_ai_health_status})
+
+
+@app.post("/api/admin/ai/model/test")
+async def api_admin_ai_model_test(request: Request):
+    """即时测试单个模型连通性（不依赖定时任务）"""
+    try:
+        p = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "格式错误"}, status_code=400)
+    session_id = p.get("session_id", "")
+    if not _verify_admin_session(session_id):
+        return JSONResponse({"ok": False, "error": "未登录"}, status_code=401)
+
+    api_base = p.get("api_base", "").strip()
+    api_key = p.get("api_key", "").strip()
+    model = p.get("model", "deepseek-chat").strip()
+    name = p.get("name", "测试接口")
+
+    if not api_base or not api_key:
+        return JSONResponse({"ok": False, "error": "api_base 和 api_key 不能为空"}, status_code=400)
+
+    try:
+        import httpx
+        import time as _time
+        url = f"{api_base.rstrip('/')}/chat/completions"
+        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
+        payload = {"model": model, "messages": [{"role": "user", "content": "hi"}], "max_tokens": 5}
+        t0 = _time.perf_counter()
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(url, headers=headers, json=payload)
+            elapsed = int((_time.perf_counter() - t0) * 1000)
+        if resp.status_code == 200:
+            return JSONResponse({"ok": True, "name": name, "status": "ok", "elapsed_ms": elapsed, "api_base": api_base, "model": model})
+        else:
+            body = resp.text[:200]
+            return JSONResponse({"ok": True, "name": name, "status": f"error_{resp.status_code}", "elapsed_ms": elapsed, "detail": body, "api_base": api_base, "model": model})
+    except Exception as e:
+        return JSONResponse({"ok": True, "name": name, "status": f"error: {str(e)[:60]}", "elapsed_ms": 0, "api_base": api_base, "model": model})
+
+
+@app.post("/api/admin/ai/health/run-now")
+async def api_admin_ai_health_run_now(request: Request):
+    """立即执行一次 AI 池健康检测（触发后台任务）"""
+    session_id = request.query_params.get("session_id", "")
+    if not _verify_admin_session(session_id):
+        return JSONResponse({"ok": False, "error": "未登录"}, status_code=401)
+    try:
+        result = await _ai_health_check_cycle()
+        return JSONResponse({"ok": True, "status": _ai_health_status})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)[:200]})
+
+
+@app.put("/api/admin/ai/auto-switch")
+async def api_admin_ai_auto_switch(request: Request):
+    """切换自动故障切换开关"""
+    try:
+        p = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "格式错误"}, status_code=400)
+    session_id = p.get("session_id", "")
+    if not _verify_admin_session(session_id):
+        return JSONResponse({"ok": False, "error": "未登录"}, status_code=401)
+    global _ai_health_status
+    _ai_health_status["auto_switching"] = bool(p.get("enabled", True))
+    return JSONResponse({"ok": True, "auto_switching": _ai_health_status["auto_switching"]})
 
 
 if __name__ == "__main__":

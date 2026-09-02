@@ -22,6 +22,19 @@ input, select, textarea { background:#0f172a; color:#e2e8f0; border:1px solid #3
 input:focus, select:focus, textarea:focus { outline:none; border-color:#38bdf8; box-shadow: 0 0 0 2px rgba(56,189,248,.2); }
 .btn-primary { background: linear-gradient(135deg,#0ea5e9,#6366f1); }
 .btn-primary:hover { filter: brightness(1.1); }
+/* AI 模型健康状态灯 */
+.ai-dot { width:10px; height:10px; border-radius:50%; display:inline-block; flex-shrink:0; }
+.ai-dot.green { background:#22c55e; box-shadow: 0 0 6px #22c55e; }
+.ai-dot.red   { background:#ef4444; box-shadow: 0 0 6px #ef4444; }
+.ai-dot.yellow{ background:#eab308; box-shadow: 0 0 6px #eab308; }
+.ai-dot.gray  { background:#64748b; box-shadow: none; }
+@keyframes ai-blink-green { 0%,100%{opacity:1;box-shadow:0 0 8px #22c55e} 50%{opacity:0.4;box-shadow:0 0 2px #22c55e} }
+.ai-dot.green.blink { animation: ai-blink-green 1.5s ease-in-out infinite; }
+@keyframes ai-blink-red { 0%,100%{opacity:1;box-shadow:0 0 8px #ef4444} 50%{opacity:0.5;box-shadow:0 0 3px #ef4444} }
+.ai-dot.red.blink { animation: ai-blink-red 1s ease-in-out infinite; }
+.ai-status-bar { background: linear-gradient(90deg,#1e293b,#0f172a); border:1px solid #334155; border-radius:10px; padding:10px 16px; display:flex; align-items:center; gap:12px; font-size:13px; }
+.ai-pool-card { background: linear-gradient(145deg,#1e293b,#172033); border:1px solid #334155; border-radius:12px; overflow:hidden; }
+.ai-pool-row:hover { background:rgba(56,189,248,0.04); }
 </style>
 </head>
 <body class="text-slate-200">
@@ -751,6 +764,89 @@ input:focus, select:focus, textarea:focus { outline:none; border-color:#38bdf8; 
         <div class="flex justify-end gap-2">
           <button onclick="loadSettings()" class="btn-ghost !py-2">🔄 放弃修改 / 还原</button>
           <button onclick="saveAllSettings()" class="btn-primary !py-2 !px-8">💾 保存全部并生效</button>
+        </div>
+
+        <!-- AI 多模型智能配置 -->
+        <div id="ai-pool-section" class="mt-8 hidden">
+          <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+            <div>
+              <h3 class="text-base font-bold text-white">🤖 AI 多模型智能配置</h3>
+              <p class="text-xs text-slate-400 mt-0.5">添加多个 AI 模型，系统自动检测畅通状态，失败时自动切换至可用模型</p>
+            </div>
+            <div class="flex gap-2 flex-wrap">
+              <button onclick="aiPoolRunHealthCheck()" class="btn-ghost !py-1.5 !px-3 text-xs" id="ai-health-check-btn">🩺 立即检测</button>
+              <button onclick="aiPoolOpenAddModal()" class="btn-primary !py-1.5 !px-3 text-xs">➕ 添加模型</button>
+              <button onclick="aiPoolBackup()" class="btn-ghost !py-1.5 !px-3 text-xs">📦 备份配置</button>
+              <button onclick="aiPoolRestore()" class="btn-ghost !py-1.5 !px-3 text-xs">📂 恢复配置</button>
+            </div>
+          </div>
+
+          <!-- 状态栏 -->
+          <div id="ai-status-bar" class="ai-status-bar mb-4">
+            <span class="ai-dot gray" id="ai-main-dot"></span>
+            <span id="ai-status-text" class="text-slate-300">加载中...</span>
+            <span id="ai-auto-switch-badge" class="ml-auto text-[11px] px-2 py-0.5 rounded-full bg-indigo-600/30 text-indigo-300 border border-indigo-500/30">自动切换: 开启</span>
+          </div>
+
+          <!-- 模型列表 -->
+          <div class="ai-pool-card">
+            <div class="overflow-x-auto">
+              <table class="w-full text-sm">
+                <thead>
+                  <tr class="bg-slate-800/80 text-slate-300 text-xs uppercase tracking-wider">
+                    <th class="text-center px-4 py-3 w-12">状态</th>
+                    <th class="text-left px-4 py-3">名称</th>
+                    <th class="text-left px-4 py-3">API Base</th>
+                    <th class="text-left px-4 py-3">模型</th>
+                    <th class="text-center px-4 py-3 w-20">优先级</th>
+                    <th class="text-center px-4 py-3 w-24">启用</th>
+                    <th class="text-center px-4 py-3 w-28">延迟</th>
+                    <th class="text-center px-4 py-3 w-32">操作</th>
+                  </tr>
+                </thead>
+                <tbody id="ai-pool-body">
+                  <tr><td colspan="8" class="text-center text-slate-500 py-8">加载中...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- 添加/编辑模型弹窗 -->
+          <div id="ai-model-modal" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+            <div class="card w-full max-w-lg rounded-2xl p-6 shadow-2xl">
+              <div class="flex items-center justify-between mb-5">
+                <h3 class="text-lg font-bold text-white" id="ai-modal-title">➕ 添加 AI 模型</h3>
+                <button onclick="aiPoolCloseModal()" class="text-slate-400 hover:text-white text-xl">✕</button>
+              </div>
+              <div class="space-y-4">
+                <div>
+                  <label class="text-xs text-slate-400 mb-1 block">模型名称 <span class="text-rose-400">*</span></label>
+                  <input id="ai-model-name" type="text" placeholder="如：DeepSeek V3 备用" class="w-full">
+                </div>
+                <div>
+                  <label class="text-xs text-slate-400 mb-1 block">API Base URL <span class="text-rose-400">*</span></label>
+                  <input id="ai-model-api-base" type="text" placeholder="https://api.deepseek.com" class="w-full">
+                </div>
+                <div>
+                  <label class="text-xs text-slate-400 mb-1 block">API Key <span class="text-rose-400">*</span></label>
+                  <input id="ai-model-api-key" type="password" placeholder="sk-xxxxxxxx" class="w-full" autocomplete="new-password">
+                </div>
+                <div>
+                  <label class="text-xs text-slate-400 mb-1 block">模型名称</label>
+                  <input id="ai-model-name-model" type="text" placeholder="deepseek-chat" class="w-full">
+                  <div class="text-[11px] text-slate-500 mt-1">支持：deepseek-chat / deepseek-coder / gpt-4o / gpt-4o-mini 等 OpenAI 兼容模型</div>
+                </div>
+                <div>
+                  <label class="text-xs text-slate-400 mb-1 block">优先级（数字越小越优先）</label>
+                  <input id="ai-model-priority" type="number" value="10" class="w-full">
+                </div>
+              </div>
+              <div class="flex justify-end gap-2 mt-6">
+                <button onclick="aiPoolCloseModal()" class="btn-ghost !py-2">取消</button>
+                <button onclick="aiPoolSaveModel()" class="btn-primary !py-2 !px-6" id="ai-modal-save-btn">💾 保存并测试</button>
+              </div>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -3888,6 +3984,268 @@ async function saveAllSettings(event) {
   // 重新加载
   await loadSettings();
 }
+
+// ============ AI 多模型智能配置 ============
+let _AI_POOL_STATE = { keys: [], health: {}, editingIndex: -1 };
+let _aiHealthPollTimer = null;
+
+function _aiDotClass(status) {
+  if (status === 'ok') return 'green blink';
+  if (status && status.startsWith('error')) return 'red blink';
+  if (status === 'no_config') return 'yellow';
+  return 'gray';
+}
+
+function _aiStatusText(status, elapsed) {
+  if (status === 'ok') return `✅ 畅通 ${elapsed}ms`;
+  if (status && status.startsWith('error_')) return `❌ HTTP ${status.replace('error_','')} · ${elapsed}ms`;
+  if (status && status.startsWith('error:')) return `❌ 网络异常 · ${status.replace('error: ','')}`;
+  if (status === 'no_config') return '⚠️ 未配置';
+  return '⏳ 未检测';
+}
+
+async function aiPoolLoad() {
+  const r = await adminFetch('/api/admin/ai/pool');
+  if (!r.ok) return toast(r.error || '加载失败', 'error');
+  _AI_POOL_STATE.keys = r.keys || [];
+  await aiPoolLoadHealth();
+  aiPoolRender();
+}
+
+async function aiPoolLoadHealth() {
+  const r = await adminFetch('/api/admin/ai/health/status');
+  if (!r.ok) return;
+  _AI_POOL_STATE.health = r;
+  // 更新状态栏
+  const dot = document.getElementById('ai-main-dot');
+  const text = document.getElementById('ai-status-text');
+  const badge = document.getElementById('ai-auto-switch-badge');
+  if (r.healthy_count > 0) {
+    dot.className = 'ai-dot green blink';
+    text.textContent = `${r.healthy_count}/${r.total_count} 个模型畅通 · 上次检测: ${r.last_check || '-'}`;
+  } else if (r.total_count > 0) {
+    dot.className = 'ai-dot red blink';
+    text.textContent = `⚠️ ${r.total_count} 个模型全部不可用 · 上次检测: ${r.last_check || '-'}`;
+  } else {
+    dot.className = 'ai-dot gray';
+    text.textContent = '暂无已配置的 AI 模型';
+  }
+  if (badge) badge.textContent = `自动切换: ${r.auto_switching ? '开启' : '关闭'}`;
+}
+
+function aiPoolRender() {
+  const body = document.getElementById('ai-pool-body');
+  const keys = _AI_POOL_STATE.keys;
+  if (!keys.length) {
+    body.innerHTML = '<tr><td colspan="8" class="text-center text-slate-500 py-10">暂无 AI 模型，点击上方「➕ 添加模型」开始配置</td></tr>';
+    return;
+  }
+  body.innerHTML = keys.map((k, i) => {
+    const health = (_AI_POOL_STATE.health && _AI_POOL_STATE.health.keys && _AI_POOL_STATE.health.keys[i]) || null;
+    const dotClass = health ? _aiDotClass(health.status) : 'gray';
+    const statusText = health ? _aiStatusText(health.status, health.elapsed_ms) : '—';
+    const enableLabel = k.enabled ? '✅' : '⬜';
+    return `
+      <tr class="ai-pool-row border-t border-slate-700/50">
+        <td class="text-center py-3"><span class="ai-dot ${dotClass}" title="${statusText}"></span></td>
+        <td class="py-3 font-medium text-slate-200">${k.name || '未命名'}</td>
+        <td class="py-3 text-xs text-slate-400 font-mono max-w-[200px] truncate" title="${k.api_base}">${k.api_base}</td>
+        <td class="py-3 text-xs text-slate-300">${k.model || 'deepseek-chat'}</td>
+        <td class="text-center py-3"><span class="text-xs bg-slate-700/60 px-2 py-0.5 rounded">${k.priority ?? 99}</span></td>
+        <td class="text-center py-3">
+          <button onclick="aiPoolToggle(${i})" class="text-xs px-2 py-1 rounded ${k.enabled ? 'bg-emerald-600/20 text-emerald-300 hover:bg-emerald-600/30' : 'bg-slate-700/40 text-slate-400 hover:bg-slate-600/40'}">${enableLabel} ${k.enabled?'启用':'禁用'}</button>
+        </td>
+        <td class="text-center py-3 text-xs ${health && health.status==='ok'?'text-emerald-400':health&&health.status? 'text-rose-400':'text-slate-500'}">${statusText}</td>
+        <td class="text-center py-3 space-x-1">
+          <button onclick="aiPoolTestOne(${i})" class="btn-ghost !py-1 !px-2 text-xs" title="测试连通性">🩺</button>
+          <button onclick="aiPoolEdit(${i})" class="btn-ghost !py-1 !px-2 text-xs" title="编辑">✏️</button>
+          <button onclick="aiPoolDelete(${i})" class="btn-ghost !py-1 !px-2 text-xs text-rose-400 hover:text-rose-300" title="删除">🗑️</button>
+        </td>
+      </tr>`;
+  }).join('');
+}
+
+async function aiPoolTestOne(idx) {
+  const k = _AI_POOL_STATE.keys[idx];
+  if (!k) return;
+  const btn = event && event.target;
+  if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
+  const r = await adminFetch('/api/admin/ai/model/test', {
+    name: k.name, api_base: k.api_base, api_key: k.api_key, model: k.model || 'deepseek-chat'
+  }, 'POST', 20000);
+  if (btn) { btn.disabled = false; btn.textContent = '🩺'; }
+  if (r && r.status === 'ok') {
+    toast(`${k.name}: ✅ 畅通 ${r.elapsed_ms}ms`, 'success');
+  } else {
+    toast(`${k.name}: ❌ ${r.status || '未知'}`, 'error');
+  }
+  await aiPoolLoadHealth();
+  aiPoolRender();
+}
+
+async function aiPoolRunHealthCheck() {
+  const btn = document.getElementById('ai-health-check-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ 检测中...'; }
+  const r = await adminFetch('/api/admin/ai/health/run-now', {}, 'POST', 60000);
+  if (btn) { btn.disabled = false; btn.textContent = '🩺 立即检测'; }
+  if (!r || !r.ok) return toast(r?.error || '检测失败', 'error');
+  _AI_POOL_STATE.health = r.status;
+  aiPoolLoadHealth();
+  aiPoolRender();
+  toast(`✅ 健康检测完成: ${r.status.healthy_count}/${r.status.total_count} 个畅通`, 'success');
+}
+
+async function aiPoolOpenAddModal() {
+  _AI_POOL_STATE.editingIndex = -1;
+  document.getElementById('ai-modal-title').textContent = '➕ 添加 AI 模型';
+  document.getElementById('ai-modal-save-btn').textContent = '💾 保存并测试';
+  document.getElementById('ai-model-name').value = '';
+  document.getElementById('ai-model-api-base').value = '';
+  document.getElementById('ai-model-api-key').value = '';
+  document.getElementById('ai-model-name-model').value = '';
+  document.getElementById('ai-model-priority').value = (_AI_POOL_STATE.keys.length > 0 ? Math.max(..._AI_POOL_STATE.keys.map(k=>k.priority||0)) + 1 : 10);
+  document.getElementById('ai-model-modal').classList.remove('hidden');
+}
+
+function aiPoolEdit(idx) {
+  const k = _AI_POOL_STATE.keys[idx];
+  if (!k) return;
+  _AI_POOL_STATE.editingIndex = idx;
+  document.getElementById('ai-modal-title').textContent = '✏️ 编辑 AI 模型';
+  document.getElementById('ai-modal-save-btn').textContent = '💾 保存修改';
+  document.getElementById('ai-model-name').value = k.name || '';
+  document.getElementById('ai-model-api-base').value = k.api_base || '';
+  document.getElementById('ai-model-api-key').value = '';
+  document.getElementById('ai-model-name-model').value = k.model || '';
+  document.getElementById('ai-model-priority').value = k.priority ?? 99;
+  document.getElementById('ai-model-modal').classList.remove('hidden');
+}
+
+function aiPoolCloseModal() {
+  document.getElementById('ai-model-modal').classList.add('hidden');
+}
+
+async function aiPoolSaveModel() {
+  const name = document.getElementById('ai-model-name').value.trim();
+  const api_base = document.getElementById('ai-model-api-base').value.trim();
+  const api_key = document.getElementById('ai-model-api-key').value.trim();
+  const model = document.getElementById('ai-model-name-model').value.trim() || 'deepseek-chat';
+  const priority = parseInt(document.getElementById('ai-model-priority').value) || 99;
+
+  if (!name || !api_base || !api_key) {
+    return toast('请填写模型名称、API Base URL 和 API Key', 'warn');
+  }
+
+  const btn = document.getElementById('ai-modal-save-btn');
+  btn.disabled = true; btn.textContent = '⏳ 保存中...';
+
+  const item = { name, api_base, model, priority, enabled: true };
+  const idx = _AI_POOL_STATE.editingIndex;
+
+  let r;
+  if (idx >= 0) {
+    item.api_key = api_key;
+    r = await adminFetch(`/api/admin/ai/pool/update/${idx}`, { item }, 'PUT');
+  } else {
+    item.api_key = api_key;
+    r = await adminFetch('/api/admin/ai/pool/add', { item }, 'POST');
+  }
+
+  btn.disabled = false;
+  if (!r || !r.ok) return toast(r?.error || '保存失败', 'error');
+
+  toast('✅ 模型已保存', 'success');
+  aiPoolCloseModal();
+  await aiPoolLoad();
+  // 保存后立即测试
+  await aiPoolRunHealthCheck();
+}
+
+async function aiPoolDelete(idx) {
+  const k = _AI_POOL_STATE.keys[idx];
+  if (!confirm(`确定删除模型「${k.name}」？`)) return;
+  const r = await adminFetch(`/api/admin/ai/pool/delete/${idx}`, {}, 'DELETE');
+  if (!r || !r.ok) return toast(r?.error || '删除失败', 'error');
+  toast('✅ 已删除', 'success');
+  await aiPoolLoad();
+}
+
+async function aiPoolToggle(idx) {
+  const k = _AI_POOL_STATE.keys[idx];
+  const r = await adminFetch(`/api/admin/ai/pool/toggle/${idx}`, { enabled: !k.enabled }, 'POST');
+  if (!r || !r.ok) return toast(r?.error || '操作失败', 'error');
+  await aiPoolLoad();
+}
+
+async function aiPoolBackup() {
+  const data = JSON.stringify(_AI_POOL_STATE.keys, null, 2);
+  const blob = new Blob([data], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `ai-pool-backup-${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  toast('📦 配置已导出为 JSON 文件', 'success');
+}
+
+async function aiPoolRestore() {
+  const input = document.createElement('input');
+  input.type = 'file'; input.accept = '.json';
+  input.onchange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const text = await file.text();
+    try {
+      const keys = JSON.parse(text);
+      if (!Array.isArray(keys)) throw new Error('格式错误');
+      // 清空现有池，批量导入
+      const current = _AI_POOL_STATE.keys.slice();
+      for (let i = current.length - 1; i >= 0; i--) {
+        await adminFetch(`/api/admin/ai/pool/delete/${i}`, {}, 'DELETE').catch(()=>{});
+      }
+      for (const k of keys) {
+        await adminFetch('/api/admin/ai/pool/add', { item: k }, 'POST').catch(()=>{});
+      }
+      await aiPoolLoad();
+      toast(`✅ 已恢复 ${keys.length} 个 AI 模型`, 'success');
+    } catch (err) {
+      toast('❌ 恢复失败: ' + err.message, 'error');
+    }
+  };
+  input.click();
+}
+
+// AI 池模块可见性：当进入系统配置 tab 时显示
+const _origSelectGroup = _selectGroup;
+_selectGroup = function(i) {
+  _origSelectGroup(i);
+  // 切换到 AI 组时显示 AI 池管理区
+  const g = _SETTINGS_STATE.groups[i];
+  const section = document.getElementById('ai-pool-section');
+  if (g && g.group_key === 'ai') {
+    section.classList.remove('hidden');
+    aiPoolLoad();
+    // 每30秒自动刷新健康状态
+    if (_aiHealthPollTimer) clearInterval(_aiHealthPollTimer);
+    _aiHealthPollTimer = setInterval(aiPoolLoadHealth, 30000);
+  } else {
+    section.classList.add('hidden');
+    if (_aiHealthPollTimer) { clearInterval(_aiHealthPollTimer); _aiHealthPollTimer = null; }
+  }
+};
+
+// 启动时默认加载第一个 tab
+const _origLoadSettings = loadSettings;
+loadSettings = async function() {
+  await _origLoadSettings();
+  // 如果有 AI 组，默认显示
+  const hasAi = _SETTINGS_STATE.groups.some(g => g.group_key === 'ai');
+  if (hasAi) {
+    const aiIdx = _SETTINGS_STATE.groups.findIndex(g => g.group_key === 'ai');
+    if (aiIdx >= 0) _selectGroup(aiIdx);
+  }
+};
 
 // 启动：检查登录
 checkAuth();
