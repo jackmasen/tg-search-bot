@@ -8,7 +8,13 @@
 import os
 import sys
 import asyncio
+import subprocess
+import tarfile
+import io
+import platform
+import psutil
 from pathlib import Path
+from datetime import datetime, timedelta
 
 # 确保项目根目录在 path 中
 sys.path.insert(0, str(Path(__file__).parent))
@@ -1843,6 +1849,734 @@ async def health_check():
         "account_pool_size": len(Config.API_IDS),
         "db_path": Config.DB_PATH,
     })
+
+
+# =========================================================================
+# 系统诊断 API（无需登录，供技术支持使用）
+# =========================================================================
+
+def _run_cmd(cmd: str, timeout: int = 10) -> dict:
+    """执行系统命令，返回结果"""
+    try:
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
+        return {"returncode": result.returncode, "stdout": result.stdout.strip(), "stderr": result.stderr.strip()}
+    except subprocess.TimeoutExpired:
+        return {"returncode": -1, "stdout": "", "stderr": "timeout"}
+    except Exception as e:
+        return {"returncode": -2, "stdout": "", "stderr": str(e)}
+
+
+def _get_service_status(service_name: str) -> dict:
+    """获取 systemd 服务状态"""
+    r = _run_cmd(f"systemctl is-active {service_name} 2>/dev/null")
+    status = r["stdout"].strip()
+    if status == "active":
+        return {"status": "running", "service": service_name}
+    elif status == "inactive":
+        return {"status": "stopped", "service": service_name}
+    elif status == "failed":
+        return {"status": "failed", "service": service_name}
+    else:
+        return {"status": "unknown", "service": service_name, "detail": status}
+
+
+def _get_recent_errors(log_file: str, lines: int = 50) -> list:
+    """获取日志文件最近的错误"""
+    errors = []
+    r = _run_cmd(f"tail -n {lines} {log_file} 2>/dev/null")
+    if r["returncode"] != 0:
+        return errors
+    for line in r["stdout"].split("\n")[-lines:]:
+        if any(kw in line.upper() for kw in ["ERROR", "TRACEBACK", "FATAL", "CRITICAL", "EXCEPTION"]):
+            errors.append(line.strip())
+    return errors
+
+
+def _get_journal_errors(service_name: str, lines: int = 50) -> list:
+    """获取 systemd journal 中的错误"""
+    errors = []
+    r = _run_cmd(f"journalctl -u {service_name} --no-pager -n {lines} 2>/dev/null")
+    if r["returncode"] != 0:
+        return errors
+    for line in r["stdout"].split("\n"):
+        if any(kw in line.upper() for kw in ["ERROR", "TRACEBACK", "FATAL", "CRITICAL", "EXCEPTION", "FAILURE"]):
+            errors.append(line.strip())
+    return errors
+
+
+def _check_port(port: int) -> dict:
+    """检查端口监听状态"""
+    r = _run_cmd(f"ss -tlnp 2>/dev/null | grep ':{port} '")
+    if r["returncode"] == 0 and r["stdout"].strip():
+        return {"port": port, "listening": True, "detail": r["stdout"].strip()[:100]}
+    return {"port": port, "listening": False}
+
+
+def _get_db_info() -> dict:
+    """获取数据库信息"""
+    info = {"path": Config.DB_PATH, "exists": False, "size_mb": 0, "error": None}
+    try:
+        p = Path(Config.DB_PATH)
+        if p.exists():
+            info["exists"] = True
+            info["size_mb"] = round(p.stat().st_size / 1024 / 1024, 2)
+    except Exception as e:
+        info["error"] = str(e)
+    return info
+
+
+def _get_git_info() -> dict:
+    """获取 Git 信息"""
+    info = {"status": "unknown", "error": None}
+    try:
+        r = _run_cmd("cd /www/wwwroot/tg-search-bot && git rev-parse --abbrev-ref HEAD 2>/dev/null")
+        if r["returncode"] == 0:
+            info["branch"] = r["stdout"].strip()
+        r = _run_cmd("cd /www/wwwroot/tg-search-bot && git log --oneline -1 2>/dev/null")
+        if r["returncode"] == 0:
+            info["latest_commit"] = r["stdout"].strip()
+        r = _run_cmd("cd /www/wwwroot/tg-search-bot && git status --short 2>/dev/null")
+        if r["returncode"] == 0:
+            info["dirty"] = bool(r["stdout"].strip())
+            if info["dirty"]:
+                info["changes"] = r["stdout"].strip()[:200]
+    except Exception as e:
+        info["error"] = str(e)
+    return info
+
+
+def _get_system_info() -> dict:
+    """获取系统资源信息"""
+    info = {}
+    try:
+        info["hostname"] = platform.node()
+        info["os"] = f"{platform.system()} {platform.release()}"
+        info["python"] = platform.python_version()
+    except:
+        pass
+    try:
+        info["cpu_percent"] = psutil.cpu_percent(interval=1)
+    except:
+        info["cpu_percent"] = None
+    try:
+        mem = psutil.virtual_memory()
+        info["memory_total_gb"] = round(mem.total / 1024**3, 2)
+        info["memory_used_percent"] = mem.percent
+    except:
+        info["memory_total_gb"] = None
+        info["memory_used_percent"] = None
+    try:
+        disk = psutil.disk_usage("/")
+        info["disk_total_gb"] = round(disk.total / 1024**3, 2)
+        info["disk_used_percent"] = disk.percent
+    except:
+        info["disk_total_gb"] = None
+        info["disk_used_percent"] = None
+    return info
+
+
+@app.get("/api/diagnostic")
+async def diagnostic_api():
+    """系统诊断 API - 返回完整的系统诊断信息（无需登录）"""
+    now = datetime.now()
+    result = {
+        "timestamp": now.isoformat(),
+        "version": Config.APP_VERSION,
+        "summary": {"status": "healthy", "issues": []},
+        "services": {},
+        "ports": {},
+        "database": {},
+        "logs": {},
+        "git": {},
+        "system": {},
+        "ai_health": {},
+        "recommendations": [],
+    }
+
+    # 服务状态
+    bot_svc = _get_service_status("tg-search-bot")
+    admin_svc = _get_service_status("tg-search-admin")
+    nginx_svc = _get_service_status("nginx")
+    result["services"] = {
+        "tg-search-bot": bot_svc,
+        "tg-search-admin": admin_svc,
+        "nginx": nginx_svc,
+    }
+
+    # 端口检查
+    result["ports"]["8001"] = _check_port(8001)
+    result["ports"]["80"] = _check_port(80)
+
+    # 数据库
+    result["database"] = _get_db_info()
+
+    # Git 信息
+    result["git"] = _get_git_info()
+
+    # 系统资源
+    result["system"] = _get_system_info()
+
+    # 错误日志收集
+    log_paths = [
+        ("/www/wwwroot/tg-search-bot/logs/admin_stderr.log", "admin_stderr"),
+        ("/www/wwwroot/tg-search-bot/logs/admin_stdout.log", "admin_stdout"),
+        ("/www/wwwroot/tg-search-bot/logs/stderr.log", "bot_stderr"),
+        ("/www/wwwroot/tg-search-bot/logs/stdout.log", "bot_stdout"),
+    ]
+    for path, key in log_paths:
+        result["logs"][key] = {
+            "file": path,
+            "exists": Path(path).exists(),
+            "recent_errors": _get_recent_errors(path, 30) if Path(path).exists() else [],
+            "tail": "",
+        }
+        if Path(path).exists():
+            r = _run_cmd(f"tail -n 20 {path} 2>/dev/null")
+            result["logs"][key]["tail"] = r["stdout"] if r["returncode"] == 0 else ""
+
+    # Journal 错误
+    result["logs"]["bot_journal_errors"] = _get_journal_errors("tg-search-bot", 20)
+    result["logs"]["admin_journal_errors"] = _get_journal_errors("tg-search-admin", 20)
+
+    # AI 健康状态
+    result["ai_health"] = {
+        "last_check": _ai_health_status.get("last_check"),
+        "healthy_count": _ai_health_status.get("healthy_count", 0),
+        "total_count": _ai_health_status.get("total_count", 0),
+        "auto_switching": _ai_health_status.get("auto_switching", True),
+    }
+
+    # 汇总状态和推荐
+    issues = result["summary"]["issues"]
+    recommendations = result["recommendations"]
+
+    if bot_svc["status"] != "running":
+        issues.append(f"Bot 服务未运行: {bot_svc['status']}")
+    if admin_svc["status"] != "running":
+        issues.append(f"Admin 服务未运行: {admin_svc['status']}")
+    if nginx_svc["status"] != "running":
+        issues.append(f"Nginx 服务未运行: {nginx_svc['status']}")
+    if not result["ports"]["8001"]["listening"]:
+        issues.append("端口 8001 未监听（Admin 服务可能未启动）")
+    if not result["database"]["exists"]:
+        issues.append(f"数据库文件不存在: {result['database']['path']}")
+    if result["database"].get("error"):
+        issues.append(f"数据库错误: {result['database']['error']}")
+    if result["logs"].get("admin_stderr") and result["logs"]["admin_stderr"]["recent_errors"]:
+        issues.append(f"Admin 错误日志有 {len(result['logs']['admin_stderr']['recent_errors'])} 条错误")
+    if result["logs"].get("bot_stderr") and result["logs"]["bot_stderr"]["recent_errors"]:
+        issues.append(f"Bot 错误日志有 {len(result['logs']['bot_stderr']['recent_errors'])} 条错误")
+
+    if admin_svc["status"] == "failed" or (not result["ports"]["8001"]["listening"] and admin_svc["status"] != "running"):
+        recommendations.append("尝试执行: systemctl restart tg-search-admin")
+    if bot_svc["status"] == "failed":
+        recommendations.append("尝试执行: systemctl restart tg-search-bot")
+    if result["logs"].get("admin_stderr") and result["logs"]["admin_stderr"]["recent_errors"]:
+        recommendations.append("查看 Admin 错误日志: tail -100 /www/wwwroot/tg-search-bot/logs/admin_stderr.log")
+    if result["logs"].get("admin_journal_errors"):
+        recommendations.append("查看 Admin journal 错误: journalctl -u tg-search-admin --no-pager -n 50")
+
+    result["summary"]["issues"] = issues
+    result["summary"]["recommendations"] = recommendations
+    result["summary"]["status"] = "healthy" if len(issues) == 0 else ("warning" if len(issues) <= 2 else "critical")
+    result["summary"]["issue_count"] = len(issues)
+
+    return JSONResponse(result)
+
+
+@app.get("/diagnostic", response_class=HTMLResponse)
+async def diagnostic_page():
+    """系统诊断可视化页面"""
+    api_data = await diagnostic_api.__wrapped__() if hasattr(diagnostic_api, '__wrapped__') else None
+
+    now = datetime.now()
+    html_content = f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>系统诊断 - TG Search Bot</title>
+    <style>
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }}
+        .container {{ max-width: 1200px; margin: 0 auto; padding: 20px; }}
+        .header {{ text-align: center; padding: 30px 0; border-bottom: 1px solid #334155; margin-bottom: 30px; }}
+        .header h1 {{ font-size: 28px; color: #f8fafc; margin-bottom: 10px; }}
+        .header .version {{ color: #94a3b8; font-size: 14px; }}
+        .status-banner {{ display: flex; align-items: center; justify-content: center; gap: 15px; padding: 20px; border-radius: 12px; margin-bottom: 30px; font-size: 18px; font-weight: 600; }}
+        .status-banner.healthy {{ background: linear-gradient(135deg, #065f46, #064e3b); border: 1px solid #10b981; }}
+        .status-banner.warning {{ background: linear-gradient(135deg, #92400e, #78350f); border: 1px solid #f59e0b; }}
+        .status-banner.critical {{ background: linear-gradient(135deg, #991b1b, #7f1d1d); border: 1px solid #ef4444; }}
+        .status-dot {{ width: 12px; height: 12px; border-radius: 50%; animation: pulse 2s infinite; }}
+        .status-banner.healthy .status-dot {{ background: #10b981; }}
+        .status-banner.warning .status-dot {{ background: #f59e0b; }}
+        .status-banner.critical .status-dot {{ background: #ef4444; }}
+        @keyframes pulse {{ 0%, 100% {{ opacity: 1; }} 50% {{ opacity: 0.5; }} }}
+        .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 20px; }}
+        .card {{ background: #1e293b; border-radius: 12px; padding: 20px; border: 1px solid #334155; }}
+        .card-header {{ display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #334155; }}
+        .card-title {{ font-size: 16px; font-weight: 600; color: #f8fafc; display: flex; align-items: center; gap: 8px; }}
+        .card-badge {{ font-size: 12px; padding: 3px 10px; border-radius: 20px; font-weight: 500; }}
+        .badge-success {{ background: #065f46; color: #10b981; }}
+        .badge-warning {{ background: #92400e; color: #f59e0b; }}
+        .badge-error {{ background: #991b1b; color: #ef4444; }}
+        .badge-info {{ background: #1e3a5f; color: #60a5fa; }}
+        .service-row {{ display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #334155; }}
+        .service-row:last-child {{ border-bottom: none; }}
+        .service-name {{ font-weight: 500; }}
+        .service-status {{ display: flex; align-items: center; gap: 8px; font-size: 14px; }}
+        .service-dot {{ width: 8px; height: 8px; border-radius: 50%; }}
+        .dot-running {{ background: #10b981; }}
+        .dot-stopped {{ background: #6b7280; }}
+        .dot-failed {{ background: #ef4444; animation: pulse 1s infinite; }}
+        .dot-unknown {{ background: #f59e0b; }}
+        .metric-row {{ display: flex; justify-content: space-between; padding: 8px 0; font-size: 14px; }}
+        .metric-label {{ color: #94a3b8; }}
+        .metric-value {{ color: #e2e8f0; font-weight: 500; }}
+        .metric-value.ok {{ color: #10b981; }}
+        .metric-value.warn {{ color: #f59e0b; }}
+        .metric-value.err {{ color: #ef4444; }}
+        .error-list {{ max-height: 200px; overflow-y: auto; }}
+        .error-item {{ background: #1e1e1e; border-radius: 6px; padding: 8px 12px; margin-bottom: 6px; font-family: 'Courier New', monospace; font-size: 12px; color: #f87171; word-break: break-all; }}
+        .error-item:last-child {{ margin-bottom: 0; }}
+        .recommendation {{ background: #1e3a5f; border-radius: 8px; padding: 12px 16px; margin-bottom: 10px; display: flex; align-items: flex-start; gap: 10px; }}
+        .recommendation:last-child {{ margin-bottom: 0; }}
+        .rec-icon {{ color: #60a5fa; font-size: 18px; }}
+        .rec-text {{ font-size: 14px; color: #e2e8f0; }}
+        .rec-code {{ background: #0f172a; padding: 2px 6px; border-radius: 4px; font-family: monospace; color: #34d399; }}
+        .refresh-btn {{ background: #3b82f6; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 500; transition: background 0.2s; }}
+        .refresh-btn:hover {{ background: #2563eb; }}
+        .auto-refresh {{ display: flex; align-items: center; gap: 10px; color: #94a3b8; font-size: 13px; }}
+        .auto-refresh input {{ accent-color: #3b82f6; }}
+        .log-section {{ margin-top: 15px; }}
+        .log-tabs {{ display: flex; gap: 5px; margin-bottom: 10px; flex-wrap: wrap; }}
+        .log-tab {{ background: #334155; border: none; color: #94a3b8; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; }}
+        .log-tab.active {{ background: #3b82f6; color: white; }}
+        .log-content {{ background: #0f172a; border-radius: 8px; padding: 12px; max-height: 250px; overflow-y: auto; font-family: 'Courier New', monospace; font-size: 12px; line-height: 1.6; color: #94a3b8; }}
+        .log-content .error-line {{ color: #f87171; }}
+        .log-content .info-line {{ color: #60a5fa; }}
+        .log-content .warn-line {{ color: #fbbf24; }}
+        .export-btn {{ background: #10b981; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 13px; margin-top: 15px; }}
+        .export-btn:hover {{ background: #059669; }}
+        .copy-btn {{ background: #6366f1; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 13px; margin-left: 10px; }}
+        .copy-btn:hover {{ background: #4f46e5; }}
+        .btn-group {{ display: flex; gap: 10px; margin-top: 20px; justify-content: center; }}
+        ::-webkit-scrollbar {{ width: 6px; height: 6px; }}
+        ::-webkit-scrollbar-track {{ background: #1e293b; }}
+        ::-webkit-scrollbar-thumb {{ background: #475569; border-radius: 3px; }}
+        ::-webkit-scrollbar-thumb:hover {{ background: #64748b; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔍 TG Search Bot 系统诊断</h1>
+            <div class="version">版本: {Config.APP_VERSION} | 生成时间: {now.strftime('%Y-%m-%d %H:%M:%S')}</div>
+        </div>
+
+        <div id="statusBanner" class="status-banner healthy">
+            <div class="status-dot"></div>
+            <span id="statusText">系统运行正常</span>
+        </div>
+
+        <div class="grid">
+            <!-- 服务状态 -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">🖥️ 服务状态</div>
+                    <span class="card-badge badge-info" id="serviceSummary">检查中...</span>
+                </div>
+                <div id="serviceList"></div>
+            </div>
+
+            <!-- 系统资源 -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">📊 系统资源</div>
+                    <span class="card-badge badge-info">实时</span>
+                </div>
+                <div id="systemInfo"></div>
+            </div>
+
+            <!-- 数据库 -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">💾 数据库</div>
+                    <span class="card-badge badge-info" id="dbStatus">检查中...</span>
+                </div>
+                <div id="dbInfo"></div>
+            </div>
+
+            <!-- Git 状态 -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">📦 Git 版本</div>
+                    <span class="card-badge badge-info">源码管理</span>
+                </div>
+                <div id="gitInfo"></div>
+            </div>
+
+            <!-- AI 健康 -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">🤖 AI 模型健康</div>
+                    <span class="card-badge badge-info" id="aiStatus">检查中...</span>
+                </div>
+                <div id="aiInfo"></div>
+            </div>
+
+            <!-- 端口状态 -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">🔌 端口监听</div>
+                    <span class="card-badge badge-info">网络</span>
+                </div>
+                <div id="portInfo"></div>
+            </div>
+        </div>
+
+        <!-- 错误日志 -->
+        <div class="card" style="margin-top: 20px;">
+            <div class="card-header">
+                <div class="card-title">📋 错误日志收集</div>
+                <div>
+                    <button class="export-btn" onclick="exportLogs()">📥 导出日志</button>
+                    <button class="copy-btn" onclick="copyDiagnostic()">📋 复制诊断信息</button>
+                </div>
+            </div>
+            <div class="log-tabs">
+                <button class="log-tab active" onclick="switchTab('adminErr')">Admin 错误</button>
+                <button class="log-tab" onclick="switchTab('botErr')">Bot 错误</button>
+                <button class="log-tab" onclick="switchTab('adminJournal')">Admin Journal</button>
+                <button class="log-tab" onclick="switchTab('botJournal')">Bot Journal</button>
+            </div>
+            <div class="log-content" id="logContent"></div>
+        </div>
+
+        <!-- 建议 -->
+        <div class="card" style="margin-top: 20px;" id="recommendationsCard">
+            <div class="card-header">
+                <div class="card-title">💡 诊断建议</div>
+            </div>
+            <div id="recommendations"></div>
+        </div>
+
+        <div class="btn-group">
+            <button class="refresh-btn" onclick="refreshDiagnostic()">🔄 刷新诊断</button>
+            <div class="auto-refresh">
+                <input type="checkbox" id="autoRefresh" checked>
+                <label for="autoRefresh">自动刷新 (30秒)</label>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentTab = 'adminErr';
+        let diagnosticData = null;
+        let autoRefreshTimer = null;
+
+        const LOG_DATA = """ + _json.dumps({
+            "adminErr": [],
+            "botErr": [],
+            "adminJournal": [],
+            "botJournal": []
+        }) + """;
+        const SVC_DATA = {"tg-search-bot": {"status": "unknown"}, "tg-search-admin": {"status": "unknown"}, "nginx": {"status": "unknown"}};
+        const PORT_DATA = {"8001": {"listening": false}, "80": {"listening": false}};
+        const DB_DATA = {"exists": false, "path": "", "size_mb": 0};
+        const GIT_DATA = {"status": "unknown", "branch": "", "latest_commit": ""};
+        const SYS_DATA = {};
+        const AI_DATA = {"last_check": null, "healthy_count": 0, "total_count": 0};
+
+        function renderServices() {
+            const container = document.getElementById('serviceList');
+            const services = [
+                {name: 'tg-search-bot', icon: '🤖', desc: 'Bot 服务'},
+                {name: 'tg-search-admin', icon: '⚙️', desc: 'Admin 服务'},
+                {name: 'nginx', icon: '🌐', desc: 'Nginx 反代'},
+            ];
+            let html = '';
+            let running = 0, failed = 0;
+            services.forEach(s => {
+                const svc = SVC_DATA[s.name] || {};
+                const status = svc.status || 'unknown';
+                const dotClass = status === 'running' ? 'dot-running' : status === 'failed' ? 'dot-failed' : status === 'stopped' ? 'dot-stopped' : 'dot-unknown';
+                const statusText = status === 'running' ? '运行中' : status === 'failed' ? '已失败' : status === 'stopped' ? '已停止' : '未知';
+                if (status === 'running') running++;
+                if (status === 'failed') failed++;
+                html += `<div class="service-row">
+                    <div>
+                        <div class="service-name">${s.icon} ${s.name}</div>
+                        <div style="font-size: 12px; color: #64748b;">${s.desc}</div>
+                    </div>
+                    <div class="service-status">
+                        <div class="service-dot ${dotClass}"></div>
+                        <span style="color: ${status === 'running' ? '#10b981' : status === 'failed' ? '#ef4444' : '#f59e0b'}">${statusText}</span>
+                    </div>
+                </div>`;
+            });
+            container.innerHTML = html;
+            document.getElementById('serviceSummary').textContent = `${running} 运行 / ${failed} 故障`;
+            document.getElementById('serviceSummary').className = 'card-badge ' + (failed > 0 ? 'badge-error' : running === 3 ? 'badge-success' : 'badge-warning');
+        }
+
+        function renderSystem() {
+            const container = document.getElementById('systemInfo');
+            const d = SYS_DATA;
+            let html = '';
+            if (d.hostname) html += metricRow('主机名', d.hostname);
+            if (d.os) html += metricRow('操作系统', d.os);
+            if (d.python) html += metricRow('Python', d.python);
+            if (d.cpu_percent !== null) html += metricRow('CPU 使用率', `${d.cpu_percent}%`, d.cpu_percent > 80 ? 'err' : d.cpu_percent > 50 ? 'warn' : 'ok');
+            if (d.memory_total_gb !== null) html += metricRow('内存使用', `${d.memory_used_percent}% (${d.memory_total_gb}GB)`);
+            if (d.disk_total_gb !== null) html += metricRow('磁盘使用', `${d.disk_used_percent}% (${d.disk_total_gb}GB)`, d.disk_used_percent > 90 ? 'err' : d.disk_used_percent > 70 ? 'warn' : 'ok');
+            if (!html) html = '<div style="color: #64748b; text-align: center; padding: 20px;">暂无数据</div>';
+            container.innerHTML = html;
+        }
+
+        function metricRow(label, value, cls = '') {
+            return `<div class="metric-row"><span class="metric-label">${label}</span><span class="metric-value ${cls}">${value}</span></div>`;
+        }
+
+        function renderDB() {
+            const container = document.getElementById('dbInfo');
+            const d = DB_DATA;
+            let html = metricRow('数据库路径', d.path || '未配置');
+            html += metricRow('文件存在', d.exists ? '✅ 是' : '❌ 否', d.exists ? 'ok' : 'err');
+            if (d.size_mb > 0) html += metricRow('文件大小', `${d.size_mb} MB`);
+            container.innerHTML = html;
+            const badge = document.getElementById('dbStatus');
+            badge.textContent = d.exists ? '正常' : '异常';
+            badge.className = 'card-badge ' + (d.exists ? 'badge-success' : 'badge-error');
+        }
+
+        function renderGit() {
+            const container = document.getElementById('gitInfo');
+            const d = GIT_DATA;
+            let html = '';
+            if (d.branch) html += metricRow('当前分支', d.branch);
+            if (d.latest_commit) html += metricRow('最新提交', d.latest_commit.substring(0, 40) + (d.latest_commit.length > 40 ? '...' : ''));
+            if (d.dirty) html += metricRow('本地修改', '⚠️ 有未提交更改', 'warn');
+            else html += metricRow('本地修改', '✅ 无', 'ok');
+            if (!html) html = '<div style="color: #64748b; text-align: center; padding: 20px;">无法获取 Git 信息</div>';
+            container.innerHTML = html;
+        }
+
+        function renderAI() {
+            const container = document.getElementById('aiInfo');
+            const d = AI_DATA;
+            let html = metricRow('健康模型', `${d.healthy_count} / ${d.total_count}`, d.total_count > 0 && d.healthy_count === d.total_count ? 'ok' : d.total_count > 0 ? 'warn' : '');
+            if (d.last_check) {
+                const time = new Date(d.last_check);
+                html += metricRow('最后检查', time.toLocaleString('zh-CN'));
+            }
+            html += metricRow('自动切换', d.auto_switching ? '✅ 开启' : '❌ 关闭');
+            container.innerHTML = html;
+            const badge = document.getElementById('aiStatus');
+            if (d.total_count === 0) {
+                badge.textContent = '未配置';
+                badge.className = 'card-badge badge-info';
+            } else if (d.healthy_count === d.total_count) {
+                badge.textContent = '全部正常';
+                badge.className = 'card-badge badge-success';
+            } else {
+                badge.textContent = `${d.healthy_count}/${d.total_count} 正常`;
+                badge.className = 'card-badge badge-warning';
+            }
+        }
+
+        function renderPorts() {
+            const container = document.getElementById('portInfo');
+            let html = '';
+            for (const [port, data] of Object.entries(PORT_DATA)) {
+                const icons = {"8001": "🔧", "80": "🌐"};
+                html += `<div class="service-row">
+                    <div>
+                        <div class="service-name">${icons[port] || '🔌'} 端口 ${port}</div>
+                    </div>
+                    <div class="service-status">
+                        <div class="service-dot ${data.listening ? 'dot-running' : 'dot-stopped'}"></div>
+                        <span style="color: ${data.listening ? '#10b981' : '#ef4444'}">${data.listening ? '监听中' : '未监听'}</span>
+                    </div>
+                </div>`;
+            }
+            container.innerHTML = html;
+        }
+
+        function renderErrors() {
+            const errors = LOG_DATA[currentTab] || [];
+            const container = document.getElementById('logContent');
+            if (errors.length === 0) {
+                container.innerHTML = '<div style="color: #10b981; text-align: center; padding: 20px;">✅ 暂无错误日志</div>';
+            } else {
+                container.innerHTML = errors.map(e => `<div class="error-line">${escapeHtml(e)}</div>`).join('');
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function renderRecommendations() {
+            const container = document.getElementById('recommendations');
+            const issues = diagnosticData?.summary?.issues || [];
+            const recs = diagnosticData?.summary?.recommendations || [];
+            if (recs.length === 0) {
+                container.innerHTML = '<div style="color: #10b981; text-align: center; padding: 20px;">✅ 系统运行正常，无需操作</div>';
+                return;
+            }
+            container.innerHTML = recs.map(r => {
+                const hasCode = r.includes('systemctl') || r.includes('tail') || r.includes('journalctl') || r.includes('git');
+                if (hasCode) {
+                    const parts = r.split(/(systemctl\s+\S+|tail\s+\S+|journalctl\s+\S+|git\s+\S+)/);
+                    let html = '';
+                    parts.forEach(p => {
+                        if (p.match(/^(systemctl|tail|journalctl|git)\s/)) {
+                            html += `<span class="rec-code">${escapeHtml(p)}</span>`;
+                        } else {
+                            html += escapeHtml(p);
+                        }
+                    });
+                    return `<div class="recommendation"><span class="rec-icon">💡</span><div class="rec-text">${html}</div></div>`;
+                }
+                return `<div class="recommendation"><span class="rec-icon">💡</span><div class="rec-text">${escapeHtml(r)}</div></div>`;
+            }).join('');
+        }
+
+        function updateStatusBanner() {
+            const issues = diagnosticData?.summary?.issues || [];
+            const status = diagnosticData?.summary?.status || 'healthy';
+            const banner = document.getElementById('statusBanner');
+            const text = document.getElementById('statusText');
+            banner.className = 'status-banner ' + status;
+            if (status === 'healthy') {
+                text.textContent = `✅ 系统运行正常 (${issues.length} 项检查通过)`;
+            } else if (status === 'warning') {
+                text.textContent = `⚠️ 系统存在警告 (${issues.length} 项问题)`;
+            } else {
+                text.textContent = `🚨 系统严重异常 (${issues.length} 项问题)`;
+            }
+        }
+
+        function switchTab(tab) {
+            currentTab = tab;
+            document.querySelectorAll('.log-tab').forEach(t => t.classList.remove('active'));
+            event.target.classList.add('active');
+            renderErrors();
+        }
+
+        function exportLogs() {
+            const data = {
+                timestamp: new Date().toISOString(),
+                version: Config.APP_VERSION || '1.0.26',
+                diagnostic: diagnosticData,
+                logs: LOG_DATA
+            };
+            const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `diagnostic_${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        function copyDiagnostic() {
+            const data = diagnosticData;
+            if (!data) return;
+            const text = JSON.stringify(data, null, 2);
+            navigator.clipboard.writeText(text).then(() => {
+                const btn = document.querySelector('.copy-btn');
+                const orig = btn.textContent;
+                btn.textContent = '✅ 已复制!';
+                setTimeout(() => btn.textContent = orig, 2000);
+            });
+        }
+
+        async function refreshDiagnostic() {
+            try {
+                const resp = await fetch('/api/diagnostic');
+                diagnosticData = await resp.json();
+                LOG_DATA.adminErr = diagnosticData.logs?.admin_stderr?.recent_errors || [];
+                LOG_DATA.botErr = diagnosticData.logs?.bot_stderr?.recent_errors || [];
+                LOG_DATA.adminJournal = diagnosticData.logs?.admin_journal_errors || [];
+                LOG_DATA.botJournal = diagnosticData.logs?.bot_journal_errors || [];
+                for (const [svc, data] of Object.entries(diagnosticData.services || {})) {
+                    SVC_DATA[svc] = data;
+                }
+                for (const [port, data] of Object.entries(diagnosticData.ports || {})) {
+                    PORT_DATA[port] = data;
+                }
+                DB_DATA.exists = diagnosticData.database?.exists || false;
+                DB_DATA.path = diagnosticData.database?.path || '';
+                DB_DATA.size_mb = diagnosticData.database?.size_mb || 0;
+                GIT_DATA.branch = diagnosticData.git?.branch || '';
+                GIT_DATA.latest_commit = diagnosticData.git?.latest_commit || '';
+                GIT_DATA.dirty = diagnosticData.git?.dirty || false;
+                Object.assign(SYS_DATA, diagnosticData.system || {});
+                Object.assign(AI_DATA, diagnosticData.ai_health || {});
+                AI_DATA.auto_switching = diagnosticData.ai_health?.auto_switching ?? true;
+
+                updateStatusBanner();
+                renderServices();
+                renderSystem();
+                renderDB();
+                renderGit();
+                renderAI();
+                renderPorts();
+                renderErrors();
+                renderRecommendations();
+            } catch (e) {
+                console.error('Refresh failed:', e);
+            }
+        }
+
+        function startAutoRefresh() {
+            if (autoRefreshTimer) clearInterval(autoRefreshTimer);
+            autoRefreshTimer = setInterval(() => {
+                if (document.getElementById('autoRefresh').checked) {
+                    refreshDiagnostic();
+                }
+            }, 30000);
+        }
+
+        document.getElementById('autoRefresh').addEventListener('change', startAutoRefresh);
+        refreshDiagnostic();
+        startAutoRefresh();
+    </script>
+</body>
+</html>"""
+    return HTMLResponse(content=html_content)
+
+
+@app.get("/api/diagnostic/export")
+async def diagnostic_export():
+    """导出完整诊断日志为 tar.gz 文件"""
+    try:
+        log_files = [
+            "/www/wwwroot/tg-search-bot/logs/admin_stderr.log",
+            "/www/wwwroot/tg-search-bot/logs/admin_stdout.log",
+            "/www/wwwroot/tg-search-bot/logs/stderr.log",
+            "/www/wwwroot/tg-search-bot/logs/stdout.log",
+            "/www/wwwroot/tg-search-bot/server.py",
+            "/www/wwwroot/tg-search-bot/.env",
+        ]
+        tar_buffer = io.BytesIO()
+        with tarfile.open(fileobj=tar_buffer, mode="w:gz") as tar:
+            for fpath in log_files:
+                if os.path.exists(fpath):
+                    tar.add(fpath, arcname=os.path.basename(fpath))
+        tar_buffer.seek(0)
+        filename = f"diagnostic_{datetime.now().strftime('%Y%m%d_%H%M%S')}.tar.gz"
+        return Response(
+            content=tar_buffer.read(),
+            media_type="application/gzip",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 # -----------------------------------------------------------------------
