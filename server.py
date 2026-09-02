@@ -759,15 +759,36 @@ function renderBotResponse(data) {{
     html += '</div>';
   }}
 
-  // 搜索结果展示（公网数据）
+  // 搜索结果展示（公网数据：消息 + 频道兜底）
   if (data.search_results && data.search_results.length) {{
-    html += `<div class="mt-3 text-xs text-gray-400 mb-1">🔎 公网搜索结果（${{data.search_results.length}} 条）：</div>`;
-    for (const msg of data.search_results) {{
-      html += `
-        <div class="mt-1 p-2.5 rounded-lg bg-[#0e1621] border-l-2 border-sky-500">
-          <div class="text-[11px] text-sky-300 mb-0.5">#${{msg.channel_title || '频道'}} · ${{msg.msg_date}}</div>
-          <div class="text-sm leading-relaxed">${{highlight(msg.content, data.keyword || '')}}</div>
-        </div>`;
+    const kw = data.keyword || '';
+    html += `<div class="mt-3 text-xs text-gray-400 mb-1">🔎 搜索结果（${{data.search_results.length}} 条）：</div>`;
+    for (const item of data.search_results) {{
+      // 频道结果：有 target_url 且无 content（或 content 很短）
+      const isChannel = item.target_url && (!item.content || item.content.length < 20);
+      if (isChannel) {{
+        const title = escapeHtml(item.title || item.channel_title || '频道');
+        const desc = escapeHtml(item.description || '');
+        const url = item.target_url || '#';
+        const members = item.member_count || 0;
+        const cat = item.category || '';
+        html += `
+          <div class="mt-1 p-2.5 rounded-lg bg-[#0e1621] border-l-2 border-sky-500">
+            <div class="text-[11px] text-sky-300 mb-0.5">#${{title}}</div>
+            ${{desc ? `<div class="text-sm leading-relaxed">${{highlight(desc, kw)}}</div>` : ''}}
+            <div class="mt-1 flex items-center gap-2 text-[11px] text-gray-400">
+              ${{cat ? `<span class="bg-sky-800/60 text-sky-200 px-1.5 py-0.5 rounded">${{escapeHtml(cat)}}</span>` : ''}}
+              ${{members ? `<span>👥${{members}}</span>` : ''}}
+              ${{url && url !== '#' ? `<a href="${{url}}" target="_blank" class="bg-emerald-600 hover:bg-emerald-500 text-white px-2 py-0.5 rounded text-[10px]">👉 加入</a>` : ''}}
+            </div>
+          </div>`;
+      }} else {{
+        html += `
+          <div class="mt-1 p-2.5 rounded-lg bg-[#0e1621] border-l-2 border-sky-500">
+            <div class="text-[11px] text-sky-300 mb-0.5">#${{item.channel_title || '频道'}}${{item.msg_date ? ' · ' + item.msg_date : ''}}</div>
+            <div class="text-sm leading-relaxed">${{highlight(item.content, kw)}}</div>
+          </div>`;
+      }}
     }}
   }}
 
@@ -4675,21 +4696,37 @@ async def api_admin_ops_git_version_history(request: Request):
 # 机器人前端 API（与 demo_server.py 保持一致）
 # =========================================================================
 async def search_messages(keyword: str, limit=5):
-    """复用搜索逻辑（仅公网FTS5消息）"""
+    """复用搜索逻辑：FTS5消息 + channels表兜底（确保无 crawled 消息时也能返回结果）"""
+    # 先尝试FTS5消息搜索
     try:
-        return await searcher.search(keyword, limit=limit)
+        fts_results = await searcher.search(keyword, limit=limit)
+        if fts_results:
+            return fts_results
     except Exception as e:
-        print(f"[生产] 搜索报错{e}，走DB fallback")
-        kw = f"%{keyword}%"
-        async with get_db() as db:
-            cur = await db.execute(
-                """SELECT m.*, c.title channel_title
-                   FROM messages m JOIN channels c ON c.id = m.channel_id
-                   WHERE m.content LIKE ? ORDER BY m.msg_date DESC LIMIT ?""",
-                (kw, limit)
-            )
-            rows = await cur.fetchall()
-            return [dict(r) for r in rows]
+        print(f"[生产] FTS5搜索报错{e}，走DB fallback")
+
+    # Fallback：搜索channels表（title/description/username）
+    kw = f"%{keyword}%"
+    async with get_db() as db:
+        cur = await db.execute(
+            """SELECT c.id, c.title, c.username, c.target_url, c.member_count,
+                    c.category, c.description, c.status, c.is_featured
+             FROM channels c
+             WHERE (c.title LIKE ? OR c.description LIKE ? OR c.username LIKE ?)
+               AND c.status = 'active'
+             ORDER BY c.is_featured DESC, c.sort_order ASC, c.id ASC
+             LIMIT ?""",
+            (kw, kw, kw, limit)
+        )
+        rows = await cur.fetchall()
+        results = []
+        for row in rows:
+            r = dict(row)
+            r["content"] = r.get("description") or r.get("title") or ""
+            r["channel_title"] = r.get("title") or r.get("username") or "频道"
+            r["msg_date"] = ""
+            results.append(r)
+        return results
 
 
 async def search_with_ads_priority(keyword: str, tg_user_id: int):
@@ -5247,8 +5284,8 @@ async def api_bot_command(request: Request):
     if priority_ads or priority_channels:
         reply_html += f"<span class='text-[11px] text-amber-400'>📣 展示 {len(priority_ads)} 条广告 + {len(priority_channels)} 个置顶频道，其余为公网数据</span><br>"
     if not results and not priority_ads and not priority_channels:
-        reply_html += "<span class='text-gray-400 text-sm'>暂未找到相关消息（试试其他词：比特币/AI/空投/Python/FastAPI）</span><br>"
-    reply_html += "<span class='text-xs text-gray-500'>（真实环境下每5分钟增量索引新消息）</span>"
+        reply_html += "<span class='text-gray-400 text-sm'>暂未找到相关内容（试试其他词：比特币/AI/空投/Python/FastAPI）</span><br>"
+    reply_html += "<span class='text-xs text-gray-500'>（包含频道目录 + 消息索引）</span>"
 
     return JSONResponse({
         "keyword": keyword,

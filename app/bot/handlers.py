@@ -374,7 +374,7 @@ async def ad_stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def search_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    核心搜索处理：关键词搜索 + 广告位插入
+    核心搜索处理：关键词搜索 + 广告位插入（FTS5消息 + channels表兜底）
     """
     keyword = update.message.text.strip()
     user_id = update.effective_user.id
@@ -398,15 +398,50 @@ async def search_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     searching_msg = await update.message.reply_text(f"🔍 正在搜索 '{keyword}'...")
 
-    # 执行搜索
-    results = await searcher.search(keyword)
+    # 执行FTS5消息搜索
+    results = []
+    try:
+        results = await searcher.search(keyword)
+    except Exception as e:
+        logger.warning(f"[搜索] FTS5报错 {e}，走channels兜底")
+
+    # Fallback：搜索channels表（title/description/username）
+    if not results:
+        async with get_db() as db:
+            kw = f"%{keyword}%"
+            cur = await db.execute(
+                """SELECT c.id, c.title, c.username, c.target_url, c.member_count,
+                        c.category, c.description, c.status, c.is_featured
+                 FROM channels c
+                 WHERE (c.title LIKE ? OR c.description LIKE ? OR c.username LIKE ?)
+                   AND c.status = 'active'
+                 ORDER BY c.is_featured DESC, c.sort_order ASC, c.id ASC
+                 LIMIT 10""",
+                (kw, kw, kw)
+            )
+            rows = await cur.fetchall()
+            results = []
+            for row in rows:
+                r = dict(row)
+                r["excerpt"] = r.get("description") or r.get("title") or ""
+                r["channel_title"] = r.get("title") or r.get("username") or "频道"
+                r["channel_username"] = r.get("username") or ""
+                r["msg_date"] = ""
+                results.append(r)
 
     # 获取匹配广告
-    ads = await ad_manager.get_ads_for_keyword(keyword, limit=2)
+    ads = []
+    try:
+        ads = await ad_manager.get_ads_for_keyword(keyword, limit=2)
+    except Exception as e:
+        logger.warning(f"[搜索] 广告查询失败 {e}")
 
     # 记录广告曝光
     for ad in ads:
-        await ad_manager.record_impression(ad["id"], user_id, is_click=False, position=1)
+        try:
+            await ad_manager.record_impression(ad["id"], user_id, is_click=False, position=1)
+        except Exception:
+            pass
 
     user_stat["count"] += 1
     _user_search_count[user_id] = user_stat
@@ -414,10 +449,13 @@ async def search_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await searching_msg.delete()
 
     if not results and not ads:
-        await update.message.reply_text(f"❌ 未找到 '{keyword}' 相关内容")
+        await update.message.reply_text(f"❌ 未找到 '{keyword}' 相关内容（试试：比特币/AI/空投/Python）")
         return
 
-    reply_text = f"🔎 搜索 '{keyword}' - 命中 {len(results)} 条\n\n"
+    reply_text = f"🔎 搜索 '{keyword}' - 命中 {len(results)} 条结果"
+    if ads:
+        reply_text += f" + {len(ads)} 条广告"
+    reply_text += "\n\n"
 
     # 广告位插入头部
     if ads:
@@ -426,20 +464,29 @@ async def search_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_text += (
                 f"📢 **{ad['title']}**\n"
                 f"   {ad['description']}\n"
-                f"   👉 {ad['target_channel']}\n\n"
+                f"   👉 {ad.get('target_channel', ad.get('target_url', ''))}\n\n"
             )
         reply_text += "━━━━━━━━━━━\n\n"
 
-    # 搜索结果
+    # 搜索结果（消息 + 频道兜底）
     for i, item in enumerate(results[:8], 1):
-        excerpt = item["excerpt"] or "（无预览）"
-        channel = item["channel_title"] or item["channel_username"] or "未知"
-        username = item["channel_username"] or ""
-        date_str = item["msg_date"][:10] if item["msg_date"] else ""
+        excerpt = item.get("excerpt") or "（无预览）"
+        channel = item.get("channel_title") or item.get("channel_username") or "未知"
+        username = item.get("channel_username") or ""
+        date_str = (item.get("msg_date") or "")[:10]
+        target_url = item.get("target_url") or ""
 
-        reply_text += f"{i}. **{channel}**\n   {excerpt}\n   📅 {date_str}"
-        if username:
-            reply_text += f"  | @{username}"
+        # 频道结果（有target_url且无excerpt）
+        if target_url and len(excerpt) < 20:
+            reply_text += f"{i}. **{channel}**\n   👉 {target_url}\n"
+            if username:
+                reply_text += f"   @{username}\n"
+        else:
+            reply_text += f"{i}. **{channel}**\n   {excerpt}\n"
+            if date_str:
+                reply_text += f"   📅 {date_str}"
+            if username:
+                reply_text += f"  | @{username}"
         reply_text += "\n\n"
 
     remaining = Config.FREE_SEARCH_DAILY_LIMIT - user_stat["count"]
