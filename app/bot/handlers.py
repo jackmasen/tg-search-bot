@@ -23,26 +23,62 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 自动注册用户
     await wallet_manager.get_or_create_user(user.id, user.username)
 
-    keyboard = [
-        [InlineKeyboardButton("🔍 直接搜索", callback_data="hint_search")],
-        [
-            InlineKeyboardButton("💰 我的钱包", callback_data="wallet"),
-            InlineKeyboardButton("📢 广告合作", callback_data="advertise"),
-        ],
-        [InlineKeyboardButton("📊 数据统计", callback_data="stats")],
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    ad_limit = Config.FEATURED_AD_LIMIT
+    featured_channels = await ad_manager.get_featured_channels(ad_limit)
+
+    hot_keywords_by_cat = await ad_manager.get_hot_keywords_by_category()
+
+    keyboard_rows = []
+    keyboard_rows.append([InlineKeyboardButton("🔍 直接搜索", callback_data="hint_search")])
+
+    # 置顶推广频道按钮（最多显示3个）
+    for idx, ch in enumerate(featured_channels[:3], 1):
+        title = ch.get('title', '') or ch.get('username', '未知频道')
+        username = ch.get('username', '')
+        if username:
+            cb = f"channel_{username}"
+        else:
+            cb = f"channel_{ch.get('id', 0)}"
+        rank_emoji = "🥇" if idx == 1 else ("🥈" if idx == 2 else "🥉" if idx == 3 else f"#{idx}")
+        keyboard_rows.append([InlineKeyboardButton(f"{rank_emoji} {title}", callback_data=cb)])
+
+    keyboard_rows.append([
+        InlineKeyboardButton("💰 我的钱包", callback_data="wallet"),
+        InlineKeyboardButton("📢 广告合作", callback_data="advertise"),
+    ])
+    keyboard_rows.append([InlineKeyboardButton("📊 数据统计", callback_data="stats")])
+
+    # 热门关键词 - 构建文字提示
+    kw_lines = []
+    kw_limit = Config.HOT_KEYWORD_PER_CATEGORY_LIMIT
+    for cat_name, cat_data in hot_keywords_by_cat.items():
+        icon = cat_data.get("icon", "🔍")
+        keywords = cat_data.get("keywords", [])
+        if keywords:
+            kw_list = [f"`{kw['keyword']}`" for kw in keywords[:kw_limit]]
+            kw_lines.append(f"{icon} **{cat_name}**：{', '.join(kw_list)}")
+    if not kw_lines:
+        default_kw = ["比特币", "以太坊", "AI", "空投", "Python", "FastAPI"]
+        kw_lines.append(f"🚀 **默认热门**：{', '.join(f'`{k}`' for k in default_kw)}")
 
     welcome = (
-        f"👋 欢迎 {user.first_name}！\n\n"
-        "🔍 **TG搜索机器人**\n"
-        "免费搜索TG频道/群组/消息内容\n\n"
-        "**使用方法：**\n"
-        "• 直接发送关键词即可搜索\n"
-        "• /wallet 查看钱包余额\n"
-        "• /advertise 广告合作\n\n"
-        f"📋 每日免费搜索：{Config.FREE_SEARCH_DAILY_LIMIT} 次"
+        f"👋 欢迎 **{user.first_name}**！\n\n"
+        "🔍 **TG搜索Pro机器人**\n"
+        "精准搜索TG频道/群组/消息内容\n\n"
+        f"📋 每日免费搜索：{Config.FREE_SEARCH_DAILY_LIMIT} 次\n\n"
     )
+
+    if featured_channels:
+        welcome += "📣 **今日置顶推荐**\n点击按钮直达频道：\n\n"
+
+    welcome += "\n".join(kw_lines) + "\n\n"
+    welcome += "**使用方法：**\n"
+    welcome += "• 直接发送关键词搜索\n"
+    welcome += "• 点击置顶按钮访问推荐频道\n"
+    welcome += "• /wallet 查看钱包余额\n"
+    welcome += "• /advertise 广告合作\n"
+
+    reply_markup = InlineKeyboardMarkup(keyboard_rows)
     await update.message.reply_text(welcome, parse_mode="Markdown", reply_markup=reply_markup)
 
 

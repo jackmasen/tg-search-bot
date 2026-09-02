@@ -148,6 +148,19 @@ class AdManager:
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
 
+    async def get_featured_channels(self, limit: int = 10) -> list:
+        """获取置顶推广频道列表（与Web演示页保持一致，查询channels表is_featured=1）"""
+        async with get_db() as db:
+            cursor = await db.execute(
+                """SELECT * FROM channels
+                   WHERE is_featured = 1
+                   ORDER BY sort_order ASC, id ASC
+                   LIMIT ?""",
+                (limit,)
+            )
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
     async def get_hot_keywords(self, limit: int = 8, category: str = None) -> list:
         """获取热门搜索关键词（优先后台配置的，再补系统默认的）"""
         async with get_db() as db:
