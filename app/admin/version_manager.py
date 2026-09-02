@@ -170,6 +170,13 @@ class VersionManager:
         except Exception as e:
             logger.error(f"自动回滚失败: {e}，需要手动恢复备份 {backup_id}")
 
+    def _ensure_git_safe(self):
+        """确保 git 认为当前目录是安全的（解决 root 用户 git 报错）"""
+        subprocess.run(
+            ["git", "config", "--global", "--add", "safe.directory", self.project_root],
+            capture_output=True,
+        )
+
     def _read_version_from_file(self) -> str:
         """从config.py读取最新版本号"""
         try:

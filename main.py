@@ -94,7 +94,12 @@ def main():
         sys.exit(1)
 
     logger.info(f"启动 TG搜索机器人 v{Config.APP_VERSION}")
-    logger.info(f"Bot Token: {'已配置 ✓' if Config.BOT_TOKEN else '未配置 ✗'}")
+    logger.info(f"Bot Token: {'已配置 ✓' if Config.BOT_TOKEN else '未配置（将从数据库加载）'}")
+
+    # 提前加载DB配置（在构建Application之前，确保BOT_TOKEN已就位）
+    logger.info("提前加载数据库配置...")
+    asyncio.run(_load_config_from_db())
+    logger.info(f"Bot Token: {'已配置 ✓' if Config.BOT_TOKEN else '仍未配置，将尝试启动'}")
 
     # 创建Bot应用
     application = Application.builder().token(Config.BOT_TOKEN).post_init(post_init).build()

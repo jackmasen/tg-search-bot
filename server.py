@@ -659,12 +659,52 @@ async function send() {{
 }}
 
 function renderBotResponse(data) {{
-  // data = {{ reply_html, actions:[{{text,cmd}}], search_results:[...], ad_result:{{...}} }}
+  // data = {{ reply_html, actions:[{{text,cmd}}], search_results:[...], ad_result:{{...}}, priority_ads:[...], priority_channels:[...] }}
   let html = data.reply_html || '';
 
-  // 搜索结果展示
+  // 优先展示广告（头部置顶）
+  if (data.priority_ads && data.priority_ads.length) {{
+    html += `<div class="mt-3"><div class="text-xs text-amber-400 mb-1.5 font-semibold">📣 广告推广（优先展示）</div>`;
+    for (const a of data.priority_ads) {{
+      html += `
+        <div class="ad-card p-3 rounded-xl text-white border border-amber-500/30 shadow-lg mb-1.5">
+          <div class="text-[10px] uppercase tracking-wider text-amber-300/80 mb-1">📣 赞助商广告 · CPC ${{a.cpc_price}}/次点击</div>
+          <a href="${{a.target_url || '#'}}" target="_blank" class="block hover:underline">
+            <div class="font-bold mb-0.5">${{a.title}}</div>
+            <div class="text-sm text-white/90">${{a.description}}</div>
+          </a>
+          <div class="mt-2 flex items-center justify-between text-[11px] text-white/70">
+            <span>关键词：${{a.keyword}}</span>
+            <span>💰 剩余预算 $${{a.remaining_budget?.toFixed(2) || '0.00'}}</span>
+          </div>
+        </div>`;
+    }}
+    html += '</div>';
+  }}
+
+  // 优先展示置顶频道
+  if (data.priority_channels && data.priority_channels.length) {{
+    html += `<div class="mt-2"><div class="text-xs text-sky-300 mb-1.5 font-semibold">⭐ 置顶推广频道</div>`;
+    for (const ch of data.priority_channels) {{
+      const title = escapeHtml(ch.title || ch.username || '频道');
+      const url = ch.target_url || '#';
+      const members = ch.member_count || 0;
+      const cat = ch.category || '';
+      html += `
+        <div class="ad-row mb-1">
+          <span class="ad-rank text-yellow-300">⭐</span>
+          <a href="${{url}}" target="_blank" class="ad-title">${{title}}</a>
+          ${{cat ? `<span class="ad-tag bg-sky-800/60 text-sky-200">${{escapeHtml(cat)}}</span>` : ''}}
+          ${{members ? `<span class="ad-tag bg-slate-700/60 text-slate-300">👥${{members}}</span>` : ''}}
+          ${{url && url !== '#' ? `<a href="${{url}}" target="_blank" class="ad-action bg-emerald-600 hover:bg-emerald-500 text-white text-[10px]">👉 加入</a>` : ''}}
+        </div>`;
+    }}
+    html += '</div>';
+  }}
+
+  // 搜索结果展示（公网数据）
   if (data.search_results && data.search_results.length) {{
-    html += `<div class="mt-3 text-xs text-gray-400 mb-1">🔎 找到 ${{data.search_results.length}} 条消息：</div>`;
+    html += `<div class="mt-3 text-xs text-gray-400 mb-1">🔎 公网搜索结果（${{data.search_results.length}} 条）：</div>`;
     for (const msg of data.search_results) {{
       html += `
         <div class="mt-1 p-2.5 rounded-lg bg-[#0e1621] border-l-2 border-sky-500">
@@ -674,7 +714,7 @@ function renderBotResponse(data) {{
     }}
   }}
 
-  // 广告展示（搜索结果下方）—— 双保险：status 必须 active 才渲染
+  // 广告展示（搜索结果下方，兼容旧格式）—— 双保险：status 必须 active 才渲染
   if (data.ad_result && data.ad_result.campaign && data.ad_result.campaign.status === 'active') {{
     const a = data.ad_result.campaign;
     html += `
@@ -3850,7 +3890,7 @@ async def api_admin_ops_git_version_history(request: Request):
 # 机器人前端 API（与 demo_server.py 保持一致）
 # =========================================================================
 async def search_messages(keyword: str, limit=5):
-    """复用搜索逻辑"""
+    """复用搜索逻辑（仅公网FTS5消息）"""
     try:
         return await searcher.search(keyword, limit=limit)
     except Exception as e:
@@ -3865,6 +3905,45 @@ async def search_messages(keyword: str, limit=5):
             )
             rows = await cur.fetchall()
             return [dict(r) for r in rows]
+
+
+async def search_with_ads_priority(keyword: str, tg_user_id: int):
+    """AI智能搜索：优先展示广告和推广频道，不足部分用公网数据补充"""
+    priority_ads = []
+    priority_channels = []
+    try:
+        ads = await ad_manager.get_ads_for_keyword(keyword, limit=3)
+        for ad in ads:
+            remaining = max(0.0, (ad.get("daily_budget") or 0) - (ad.get("daily_spent") or 0))
+            ad["remaining_budget"] = remaining
+            priority_ads.append(ad)
+    except Exception as e:
+        print(f"[搜索] 广告查询失败: {e}")
+
+    try:
+        async with get_db() as db:
+            cur = await db.execute(
+                """SELECT * FROM channels
+                   WHERE is_featured = 1 AND status = 'active'
+                   ORDER BY sort_order ASC, id ASC
+                   LIMIT 3""",
+            )
+            rows = await cur.fetchall()
+            priority_channels = [dict(row) for row in rows]
+    except Exception as e:
+        print(f"[搜索] 置顶频道查询失败: {e}")
+
+    total_limit = 5
+    ad_count = len(priority_ads) + len(priority_channels)
+    public_limit = max(0, total_limit - ad_count)
+    public_results = await search_messages(keyword, limit=public_limit) if public_limit > 0 else []
+
+    return {
+        "priority_ads": priority_ads,
+        "priority_channels": priority_channels,
+        "public_results": public_results,
+        "ad_result": priority_ads[0] if priority_ads else None,
+    }
 
 
 async def get_ad_if_match(keyword: str, searcher_tg_id: int):
@@ -4373,17 +4452,24 @@ async def api_bot_command(request: Request):
     except Exception:
         pass
 
-    results = await search_messages(keyword, limit=5)
-    ad_result = await get_ad_if_match(keyword, tg_user_id)
+    search_data = await search_with_ads_priority(keyword, tg_user_id)
+    priority_ads = search_data["priority_ads"]
+    priority_channels = search_data["priority_channels"]
+    results = search_data["public_results"]
+    ad_result = search_data["ad_result"]
 
     reply_html = f"🔎 搜索关键词：<b class='text-yellow-300'>{keyword}</b><br>"
-    if not results:
+    if priority_ads or priority_channels:
+        reply_html += f"<span class='text-[11px] text-amber-400'>📣 展示 {len(priority_ads)} 条广告 + {len(priority_channels)} 个置顶频道，其余为公网数据</span><br>"
+    if not results and not priority_ads and not priority_channels:
         reply_html += "<span class='text-gray-400 text-sm'>暂未找到相关消息（试试其他词：比特币/AI/空投/Python/FastAPI）</span><br>"
     reply_html += "<span class='text-xs text-gray-500'>（真实环境下每5分钟增量索引新消息）</span>"
 
     return JSONResponse({
         "keyword": keyword,
         "reply_html": reply_html,
+        "priority_ads": priority_ads,
+        "priority_channels": priority_channels,
         "search_results": results,
         "ad_result": ad_result,
         "actions": [

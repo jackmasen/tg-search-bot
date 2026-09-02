@@ -323,6 +323,20 @@ async def init_db():
             await db.execute("ALTER TABLE ad_campaigns ADD COLUMN updated_at TIMESTAMP")
             await db.execute("UPDATE ad_campaigns SET updated_at=COALESCE(created_at, CURRENT_TIMESTAMP) WHERE updated_at IS NULL")
 
+        # channels表补字段（广告置顶、分类、描述、跳转URL、排序）
+        async with db.execute("PRAGMA table_info(channels)") as cur:
+            cols = {row[1] for row in await cur.fetchall()}
+        if "is_featured" not in cols:
+            await db.execute("ALTER TABLE channels ADD COLUMN is_featured INTEGER DEFAULT 0")
+        if "sort_order" not in cols:
+            await db.execute("ALTER TABLE channels ADD COLUMN sort_order INTEGER DEFAULT 0")
+        if "category" not in cols:
+            await db.execute("ALTER TABLE channels ADD COLUMN category TEXT DEFAULT '其他'")
+        if "description" not in cols:
+            await db.execute("ALTER TABLE channels ADD COLUMN description TEXT DEFAULT ''")
+        if "target_url" not in cols:
+            await db.execute("ALTER TABLE channels ADD COLUMN target_url TEXT DEFAULT ''")
+
         # 初始化默认热门关键词分类
         default_categories = [
             ("加密货币", "💰", 1),

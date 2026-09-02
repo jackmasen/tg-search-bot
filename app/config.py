@@ -139,7 +139,7 @@ class Config:
     MAX_DAILY_SPEND_USDT: float = _safe_float(os.getenv("MAX_DAILY_SPEND_USDT"), 0)
 
     # ===== 版本与备份 =====
-    APP_VERSION: str = "1.0.23"
+    APP_VERSION: str = "1.0.24"
     BACKUP_DIR: str = "./data/backups"
     BACKUP_KEEP_COUNT: int = 10  # 保留最近10份备份
     VERSION_REPO_URL: str = os.getenv("VERSION_REPO_URL", "")  # Git仓库地址，用于拉取更新
@@ -253,11 +253,11 @@ class Config:
 
     @classmethod
     def validate(cls):
-        """校验必填配置（仅检查必要项，账号池可从后台动态添加）"""
+        """校验必填配置（BOT_TOKEN可从DB加载，仅警告不阻塞启动）"""
         errors = []
         warnings = []
         if not cls.BOT_TOKEN:
-            errors.append("TG_BOT_TOKEN 未配置（请在后台【系统配置】→【机器人配置】中填写，或在 .env 中配置）")
+            warnings.append("TG_BOT_TOKEN 未配置（将在post_init从数据库加载；如数据库也无则Bot无法工作）")
         if not cls.API_IDS or not cls.API_HASHES or not cls.PHONES:
             warnings.append("TELETHON 账号池未配置（请在后台【系统配置】→【采集账号池】中填写，服务可先启动，添加账号后自动加载）")
         if len(cls.API_IDS) != len(cls.API_HASHES) or len(cls.API_IDS) != len(cls.PHONES):
