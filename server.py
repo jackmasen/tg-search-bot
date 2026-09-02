@@ -5643,7 +5643,11 @@ async def api_admin_ai_pool_toggle(request: Request, index: int):
 @app.post("/api/admin/ai/pool/health-check")
 async def api_admin_ai_pool_health(request: Request):
     """检测所有 API 的健康状态"""
-    session_id = request.query_params.get("session_id", "")
+    try:
+        p = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "格式错误"}, status_code=400)
+    session_id = p.get("session_id", "")
     if not _verify_admin_session(session_id):
         return JSONResponse({"ok": False, "error": "未登录"}, status_code=401)
     try:
@@ -5739,7 +5743,11 @@ async def api_admin_ai_model_test(request: Request):
 @app.post("/api/admin/ai/health/run-now")
 async def api_admin_ai_health_run_now(request: Request):
     """立即执行一次 AI 池健康检测（触发后台任务）"""
-    session_id = request.query_params.get("session_id", "")
+    try:
+        p = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "格式错误"}, status_code=400)
+    session_id = p.get("session_id", "")
     if not _verify_admin_session(session_id):
         return JSONResponse({"ok": False, "error": "未登录"}, status_code=401)
     try:

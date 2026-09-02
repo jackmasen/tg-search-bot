@@ -211,7 +211,12 @@ async def get_ai_api_keys() -> List[dict]:
                     val = _decrypt(val, crypto_secret)
                 except Exception:
                     pass
+            if not val or not val.strip():
+                return []
             return json.loads(val)
+    except (json.JSONDecodeError, TypeError, ValueError) as e:
+        logger.warning(f"获取 API 池失败（JSON解析错误，可能需要重置）: {e}")
+        return []
     except Exception as e:
         logger.warning(f"获取 API 池失败: {e}")
         return []
