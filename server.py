@@ -4727,7 +4727,7 @@ async def api_admin_monitor_share(request: Request):
         share_id = uuid.uuid4().hex[:12]
         expires_at = _time.time() + expire_minutes * 60
         # 获取当前 dashboard 快照
-        share_data = _get_dashboard_snapshot()
+        share_data = await _get_dashboard_snapshot()
         MONITOR_SHARE_LINKS[share_id] = {
             "data": share_data,
             "created_at": _time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -4761,16 +4761,9 @@ async def api_monitor_view(share_id: str, request: Request):
     return JSONResponse({"ok": True, "share_id": share_id, "data": link["data"], "expires_at": link["expires_at"]})
 
 
-def _get_dashboard_snapshot():
+async def _get_dashboard_snapshot():
     """获取当前仪表板数据快照（供分享用）"""
-    try:
-        import asyncio as _asyncio
-        loop = _asyncio.get_event_loop() if _asyncio.get_event_loop().is_running() else None
-        if loop:
-            return _asyncio.run(_fetch_dashboard_data())
-        return {}
-    except Exception:
-        return {}
+    return await _fetch_dashboard_data()
 
 
 async def _fetch_dashboard_data():
