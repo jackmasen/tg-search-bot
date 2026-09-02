@@ -4613,22 +4613,24 @@ async def api_bot_myad_update(request: Request):
 
 
 # =========================================================================
-# AI 智能搜索 API
+# AI 智能搜索 API（多 API 池 + 自动故障切换）
 # =========================================================================
 
 @app.get("/api/admin/ai/config")
 async def api_admin_ai_config(request: Request):
-    """获取 AI 配置状态"""
+    """获取 AI 配置状态和 API 池信息"""
     session_id = request.query_params.get("session_id", "")
     if not _verify_admin_session(session_id):
         return JSONResponse({"ok": False, "error": "未登录"}, status_code=401)
     try:
         from app.ai.model_service import ai_service
-        from app.ai.settings_manager import get_ai_settings, get_ai_search_stats
+        from app.ai.settings_manager import get_ai_settings, get_ai_search_stats, get_ai_api_keys
         from app.config import Config
 
         is_configured = ai_service.is_configured()
         stats = await get_ai_search_stats(limit=30)
+        api_keys = await get_ai_api_keys()
+        pool_info = ai_service.get_pool_info()
 
         return JSONResponse({
             "ok": True,
@@ -4636,7 +4638,6 @@ async def api_admin_ai_config(request: Request):
             "config": {
                 "provider": Config.AI_PROVIDER,
                 "api_base": Config.AI_API_BASE,
-                "api_key_set": bool(Config.AI_API_KEY),
                 "model": Config.AI_MODEL,
                 "max_tokens": Config.AI_MAX_TOKENS,
                 "temperature": Config.AI_TEMPERATURE,
@@ -4644,6 +4645,7 @@ async def api_admin_ai_config(request: Request):
                 "summarize_results": Config.AI_SUMMARIZE_RESULTS,
                 "free_daily_limit": Config.AI_FREE_DAILY_LIMIT,
             },
+            "pool": pool_info,
             "stats": stats,
         })
     except Exception as e:
@@ -4652,7 +4654,7 @@ async def api_admin_ai_config(request: Request):
 
 @app.post("/api/admin/ai/config/save")
 async def api_admin_ai_config_save(request: Request):
-    """保存 AI 配置"""
+    """保存 AI 基础配置（不含 API 池，池管理走 /api/admin/ai/pool/*）"""
     try:
         p = await request.json()
     except Exception:
@@ -4669,11 +4671,114 @@ async def api_admin_ai_config_save(request: Request):
         return JSONResponse({"ok": False, "error": "config 必须是对象"}, status_code=400)
 
     try:
-        async with get_db() as db:
-            result = await batch_save_ai_settings(db, payload)
-        # 立即应用到内存 Config
+        result = await batch_save_ai_settings(payload)
         _C.apply_overrides(payload)
-        return JSONResponse({"ok": True, "saved": result})
+        return JSONResponse({"ok": True, "saved": result["saved"], "errors": result["errors"]})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)[:200]})
+
+
+@app.get("/api/admin/ai/pool")
+async def api_admin_ai_pool(request: Request):
+    """获取 API 池配置（密钥已脱敏）"""
+    session_id = request.query_params.get("session_id", "")
+    if not _verify_admin_session(session_id):
+        return JSONResponse({"ok": False, "error": "未登录"}, status_code=401)
+    try:
+        from app.ai.settings_manager import get_ai_api_keys
+        keys = await get_ai_api_keys()
+        masked = []
+        for k in keys:
+            masked.append({
+                "name": k.get("name", ""),
+                "api_base": k.get("api_base", ""),
+                "model": k.get("model", ""),
+                "priority": k.get("priority", 99),
+                "enabled": k.get("enabled", True),
+                "key_preview": (k.get("api_key", "")[:8] + "****") if k.get("api_key") else "",
+            })
+        return JSONResponse({"ok": True, "keys": masked})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)[:200]})
+
+
+@app.post("/api/admin/ai/pool/add")
+async def api_admin_ai_pool_add(request: Request):
+    """向 API 池添加新接口"""
+    try:
+        p = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "格式错误"}, status_code=400)
+    session_id = p.get("session_id", "")
+    if not _verify_admin_session(session_id):
+        return JSONResponse({"ok": False, "error": "未登录"}, status_code=401)
+
+    item = p.get("item", {})
+    if not item.get("api_key") or not item.get("api_base"):
+        return JSONResponse({"ok": False, "error": "api_key 和 api_base 不能为空"}, status_code=400)
+    try:
+        from app.ai.settings_manager import add_ai_api_key
+        result = await add_ai_api_key(item)
+        return JSONResponse(result)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)[:200]})
+
+
+@app.put("/api/admin/ai/pool/update/{index}")
+async def api_admin_ai_pool_update(request: Request, index: int):
+    """更新 API 池中指定索引的接口"""
+    session_id = request.query_params.get("session_id", "")
+    if not _verify_admin_session(session_id):
+        return JSONResponse({"ok": False, "error": "未登录"}, status_code=401)
+    try:
+        p = await request.json()
+        from app.ai.settings_manager import update_ai_api_key
+        result = await update_ai_api_key(index, p)
+        return JSONResponse(result)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)[:200]})
+
+
+@app.delete("/api/admin/ai/pool/delete/{index}")
+async def api_admin_ai_pool_delete(request: Request, index: int):
+    """删除 API 池中指定索引的接口"""
+    session_id = request.query_params.get("session_id", "")
+    if not _verify_admin_session(session_id):
+        return JSONResponse({"ok": False, "error": "未登录"}, status_code=401)
+    try:
+        from app.ai.settings_manager import delete_ai_api_key
+        result = await delete_ai_api_key(index)
+        return JSONResponse(result)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)[:200]})
+
+
+@app.post("/api/admin/ai/pool/toggle/{index}")
+async def api_admin_ai_pool_toggle(request: Request, index: int):
+    """启用/禁用 API 池中指定索引的接口"""
+    session_id = request.query_params.get("session_id", "")
+    if not _verify_admin_session(session_id):
+        return JSONResponse({"ok": False, "error": "未登录"}, status_code=401)
+    try:
+        p = await request.json()
+        enabled = p.get("enabled", True)
+        from app.ai.settings_manager import toggle_ai_api_key
+        result = await toggle_ai_api_key(index, enabled)
+        return JSONResponse(result)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)[:200]})
+
+
+@app.post("/api/admin/ai/pool/health-check")
+async def api_admin_ai_pool_health(request: Request):
+    """检测所有 API 的健康状态"""
+    session_id = request.query_params.get("session_id", "")
+    if not _verify_admin_session(session_id):
+        return JSONResponse({"ok": False, "error": "未登录"}, status_code=401)
+    try:
+        from app.ai.model_service import ai_service
+        result = await ai_service.health_check()
+        return JSONResponse({"ok": True, **result})
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)[:200]})
 
@@ -4687,7 +4792,7 @@ async def api_admin_ai_stats(request: Request):
     try:
         from app.ai.settings_manager import get_ai_search_stats, get_today_ai_usage
         stats = await get_ai_search_stats(limit=100)
-        today_usage = await get_today_ai_usage(None)  # 全用户汇总
+        today_usage = await get_today_ai_usage(None)
         return JSONResponse({"ok": True, "stats": stats, "today_usage": today_usage})
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)[:200]})

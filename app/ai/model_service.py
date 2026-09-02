@@ -1,15 +1,16 @@
 """
 AI 模型调用服务
 支持 OpenAI / DeepSeek / 任何 OpenAI 兼容 API
+支持多 API 池 + 自动故障切换
 """
 import json
+import threading
 from typing import AsyncGenerator, List, Optional
 import httpx
 from loguru import logger
 from app.config import Config
 
 
-# 搜索场景的 AI 系统提示词
 SEARCH_SYSTEM_PROMPT = """你是一个TG频道消息搜索助手。用户输入关键词，你的任务：
 1. 分析用户意图，理解搜索需求
 2. 扩展相关关键词（最多5个同义词/相关词）
@@ -19,18 +20,16 @@ SEARCH_SYSTEM_PROMPT = """你是一个TG频道消息搜索助手。用户输入�
 {"main_keyword":"主关键词","related_keywords":["词1","词2","词3","词4","词5"],"search_hint":"搜索建议"}
 只输出JSON，不要有其他内容。"""
 
-# 聊天场景的 AI 系统提示词
 CHAT_SYSTEM_PROMPT = """你是一个TG频道消息知识库问答助手。用户可以向你提问关于TG频道内容的任何问题，你会根据已有的搜索知识库帮助用户解答。"""
 
 
 class AIService:
-    """AI 模型调用服务"""
+    """AI 模型调用服务（支持多 API 池 + 自动故障切换）"""
 
     def __init__(self):
         self.provider = "deepseek"
-        self.api_base = "https://api.deepseek.com"
-        self.api_key = ""
-        self.model = "deepseek-chat"
+        self.default_api_base = "https://api.deepseek.com"
+        self.default_model = "deepseek-chat"
         self.max_tokens = 1024
         self.temperature = 0.7
         self.keyword_expand = True
@@ -38,14 +37,19 @@ class AIService:
         self.free_daily_limit = 3
         self.search_system_prompt = SEARCH_SYSTEM_PROMPT
         self.chat_system_prompt = CHAT_SYSTEM_PROMPT
+
+        # API 池：列表，每项 {"name", "api_base", "api_key", "model", "priority", "enabled"}
+        self._api_keys: List[dict] = []
+        self._key_lock = threading.Lock()
+        self._current_index = 0
+        self._fail_count: dict = {}  # key hash -> consecutive fail count
         self._load_from_config()
 
     def _load_from_config(self):
-        """从 Config 加载 AI 配置"""
+        """从 Config 加载基础 AI 配置（兼容旧单 API 模式）"""
         self.provider = getattr(Config, "AI_PROVIDER", "deepseek") or "deepseek"
-        self.api_base = getattr(Config, "AI_API_BASE", "https://api.deepseek.com") or "https://api.deepseek.com"
-        self.api_key = getattr(Config, "AI_API_KEY", "") or ""
-        self.model = getattr(Config, "AI_MODEL", "deepseek-chat") or "deepseek-chat"
+        self.default_api_base = getattr(Config, "AI_API_BASE", "https://api.deepseek.com") or "https://api.deepseek.com"
+        self.default_model = getattr(Config, "AI_MODEL", "deepseek-chat") or "deepseek-chat"
         self.max_tokens = getattr(Config, "AI_MAX_TOKENS", 1024) or 1024
         self.temperature = getattr(Config, "AI_TEMPERATURE", 0.7) or 0.7
         self.keyword_expand = getattr(Config, "AI_KEYWORD_EXPAND", True)
@@ -53,18 +57,18 @@ class AIService:
         self.free_daily_limit = getattr(Config, "AI_FREE_DAILY_LIMIT", 3) or 3
 
     async def load_from_db(self):
-        """从数据库加载配置并覆盖"""
+        """从数据库加载多 API 池配置和基础设置"""
         try:
             from app.ai.settings_manager import get_ai_config
             cfg = await get_ai_config()
+
+            # 基础配置
             if cfg.get("AI_PROVIDER"):
                 self.provider = cfg["AI_PROVIDER"]
             if cfg.get("AI_API_BASE"):
-                self.api_base = cfg["AI_API_BASE"]
-            if cfg.get("AI_API_KEY"):
-                self.api_key = cfg["AI_API_KEY"]
+                self.default_api_base = cfg["AI_API_BASE"]
             if cfg.get("AI_MODEL"):
-                self.model = cfg["AI_MODEL"]
+                self.default_model = cfg["AI_MODEL"]
             if cfg.get("AI_MAX_TOKENS"):
                 self.max_tokens = int(cfg["AI_MAX_TOKENS"])
             if cfg.get("AI_TEMPERATURE"):
@@ -77,13 +81,152 @@ class AIService:
                 self.free_daily_limit = int(cfg["AI_FREE_DAILY_LIMIT"])
             if cfg.get("AI_SEARCH_SYSTEM_PROMPT"):
                 self.search_system_prompt = cfg["AI_SEARCH_SYSTEM_PROMPT"]
-            logger.info(f"AI配置已加载: provider={self.provider}, model={self.model}")
+
+            # 多 API 池
+            raw_keys = cfg.get("AI_API_KEYS", "")
+            if raw_keys and isinstance(raw_keys, str):
+                try:
+                    self._api_keys = json.loads(raw_keys)
+                except (json.JSONDecodeError, TypeError):
+                    self._api_keys = []
+            elif isinstance(raw_keys, list):
+                self._api_keys = raw_keys
+
+            # 兼容旧单 API Key：如果有 API_KEY 则加入池首项
+            old_key = cfg.get("AI_API_KEY", "") or getattr(Config, "AI_API_KEY", "")
+            if old_key and not any(k.get("api_key") == old_key for k in self._api_keys):
+                self._api_keys.insert(0, {
+                    "name": "默认API",
+                    "api_base": self.default_api_base,
+                    "api_key": old_key,
+                    "model": self.default_model,
+                    "priority": 1,
+                    "enabled": True,
+                })
+
+            self._api_keys = [k for k in self._api_keys if k.get("enabled") and k.get("api_key")]
+            self._api_keys.sort(key=lambda x: x.get("priority", 99))
+            self._current_index = 0
+            self._fail_count.clear()
+
+            logger.info(f"AI配置已加载: provider={self.provider}, 模型池={len(self._api_keys)}个")
         except Exception as e:
             logger.warning(f"AI配置加载失败: {e}")
 
     def is_configured(self) -> bool:
-        """检查是否配置了 AI API"""
-        return bool(self.api_key) and bool(self.api_base)
+        """检查是否配置了可用 API"""
+        if self._api_keys:
+            return True
+        return bool(getattr(Config, "AI_API_KEY", "")) and bool(getattr(Config, "AI_API_BASE", ""))
+
+    def get_pool_info(self) -> dict:
+        """获取 API 池状态信息"""
+        return {
+            "total": len(self._api_keys),
+            "active": len([k for k in self._api_keys if k.get("enabled")]),
+            "keys": [
+                {
+                    "name": k.get("name", "未命名"),
+                    "api_base": k.get("api_base", ""),
+                    "model": k.get("model", ""),
+                    "enabled": k.get("enabled", True),
+                    "priority": k.get("priority", 99),
+                    "key_preview": (k.get("api_key", "")[:8] + "****") if k.get("api_key") else "",
+                }
+                for k in self._api_keys
+            ],
+        }
+
+    async def _call_api_with_fallback(
+        self,
+        messages: List[dict],
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+    ) -> dict:
+        """
+        调用 API，支持多密钥自动故障切换
+        轮流尝试池中的每个 key，失败后跳到下一个
+        """
+        keys_to_try = self._api_keys[:]
+        if not keys_to_try:
+            # 回退到旧单 API 模式
+            api_key = getattr(Config, "AI_API_KEY", "")
+            api_base = getattr(Config, "AI_API_BASE", "https://api.deepseek.com")
+            model = getattr(Config, "AI_MODEL", "deepseek-chat")
+            if not api_key:
+                return {
+                    "content": "❌ AI 功能未配置，请联系管理员在后台添加 API Key",
+                    "model": "", "input_tokens": 0, "output_tokens": 0, "pool_used": "",
+                }
+            keys_to_try = [{"name": "默认", "api_base": api_base, "api_key": api_key, "model": model}]
+
+        last_error = ""
+        for idx, key_conf in enumerate(keys_to_try):
+            api_key = key_conf.get("api_key", "")
+            api_base = key_conf.get("api_base", self.default_api_base)
+            model = key_conf.get("model", self.default_model)
+            key_name = key_conf.get("name", f"key-{idx}")
+
+            url = f"{api_base.rstrip('/')}/chat/completions"
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {api_key}",
+            }
+            payload = {
+                "model": model,
+                "messages": messages,
+                "temperature": temperature or self.temperature,
+                "max_tokens": max_tokens or self.max_tokens,
+            }
+
+            try:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    resp = await client.post(url, headers=headers, json=payload)
+                    resp.raise_for_status()
+                    data = resp.json()
+                    choice = data.get("choices", [{}])[0]
+                    content = choice.get("message", {}).get("content", "")
+                    usage = data.get("usage", {})
+                    return {
+                        "content": content,
+                        "model": data.get("model", model),
+                        "input_tokens": usage.get("prompt_tokens", 0),
+                        "output_tokens": usage.get("completion_tokens", 0),
+                        "pool_used": key_name,
+                    }
+            except httpx.HTTPStatusError as e:
+                status = e.response.status_code
+                body = e.response.text[:200]
+                last_error = f"{status}: {body}"
+                logger.warning(f"AI API [{key_name}] 失败 ({status}): {last_error}")
+                with self._key_lock:
+                    self._fail_count[key_name] = self._fail_count.get(key_name, 0) + 1
+                if status == 401 or status == 403:
+                    logger.warning(f"AI API [{key_name}] 密钥无效，已标记跳过")
+                    key_conf["enabled"] = False
+                    try:
+                        from app.ai.settings_manager import save_ai_setting
+                        await save_ai_setting("AI_API_KEYS", json.dumps(self._api_keys, ensure_ascii=False))
+                    except Exception:
+                        pass
+                continue
+            except Exception as e:
+                last_error = str(e)[:100]
+                logger.warning(f"AI API [{key_name}] 异常: {last_error}")
+                with self._key_lock:
+                    self._fail_count[key_name] = self._fail_count.get(key_name, 0) + 1
+                continue
+
+        # 所有 key 都失败
+        if self._api_keys:
+            return {
+                "content": f"❌ AI 服务暂时不可用（已尝试 {len(keys_to_try)} 个接口），请稍后重试",
+                "model": "", "input_tokens": 0, "output_tokens": 0, "pool_used": "",
+            }
+        return {
+            "content": "❌ AI 功能未配置，请联系管理员设置 API Key",
+            "model": "", "input_tokens": 0, "output_tokens": 0, "pool_used": "",
+        }
 
     async def _call_api(
         self,
@@ -91,67 +234,20 @@ class AIService:
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
     ) -> dict:
-        """
-        调用 OpenAI 兼容 API
-        返回: {"content": str, "model": str, "input_tokens": int, "output_tokens": int}
-        """
-        if not self.is_configured():
-            return {"content": "❌ AI 功能未配置，请联系管理员设置 API Key", "model": "", "input_tokens": 0, "output_tokens": 0}
-
-        url = f"{self.api_base.rstrip('/')}/chat/completions"
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.api_key}",
+        """兼容旧接口，内部调用带故障切换的方法"""
+        result = await self._call_api_with_fallback(messages, temperature, max_tokens)
+        # 返回兼容格式（去掉 pool_used）
+        return {
+            "content": result["content"],
+            "model": result["model"],
+            "input_tokens": result["input_tokens"],
+            "output_tokens": result["output_tokens"],
+            "pool_used": result.get("pool_used", ""),
         }
-        payload = {
-            "model": self.model,
-            "messages": messages,
-            "temperature": temperature or self.temperature,
-            "max_tokens": max_tokens or self.max_tokens,
-        }
-
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            try:
-                resp = await client.post(url, headers=headers, json=payload)
-                resp.raise_for_status()
-                data = resp.json()
-                choice = data.get("choices", [{}])[0]
-                content = choice.get("message", {}).get("content", "")
-                usage = data.get("usage", {})
-                return {
-                    "content": content,
-                    "model": data.get("model", self.model),
-                    "input_tokens": usage.get("prompt_tokens", 0),
-                    "output_tokens": usage.get("completion_tokens", 0),
-                }
-            except httpx.HTTPStatusError as e:
-                logger.error(f"AI API 调用失败: {e.response.status_code} - {e.response.text[:200]}")
-                return {
-                    "content": f"❌ AI API 调用失败 ({e.response.status_code})，请稍后重试",
-                    "model": "",
-                    "input_tokens": 0,
-                    "output_tokens": 0,
-                }
-            except Exception as e:
-                logger.error(f"AI API 调用异常: {e}")
-                return {
-                    "content": f"❌ AI 服务异常: {str(e)[:100]}",
-                    "model": "",
-                    "input_tokens": 0,
-                    "output_tokens": 0,
-                }
 
     async def expand_keyword(self, keyword: str) -> dict:
-        """
-        扩展关键词：生成相关关键词和搜索建议
-        返回: {"main_keyword": str, "related_keywords": list, "search_hint": str}
-        """
         if not self.keyword_expand or not self.is_configured():
-            return {
-                "main_keyword": keyword,
-                "related_keywords": [keyword],
-                "search_hint": "",
-            }
+            return {"main_keyword": keyword, "related_keywords": [keyword], "search_hint": ""}
 
         messages = [
             {"role": "system", "content": self.search_system_prompt},
@@ -160,13 +256,11 @@ class AIService:
         result = await self._call_api(messages)
         content = result.get("content", "")
 
-        # 解析 JSON 响应
         expanded = {"main_keyword": keyword, "related_keywords": [keyword], "search_hint": ""}
         try:
             parsed = json.loads(content)
             expanded.update(parsed)
         except (json.JSONDecodeError, TypeError):
-            # 如果不是 JSON，直接用原文作为提示
             expanded["search_hint"] = content[:100] if content else ""
 
         result["expanded"] = expanded
@@ -174,16 +268,11 @@ class AIService:
         return result
 
     async def summarize_search_results(self, keyword: str, results: list) -> str:
-        """
-        AI 总结搜索结果
-        results: [{channel_title, channel_username, excerpt, msg_date}, ...]
-        """
         if not self.summarize_results or not self.is_configured():
             return ""
         if not results:
             return ""
 
-        # 截取部分结果用于总结
         preview = []
         for i, item in enumerate(results[:5]):
             channel = item.get("channel_title") or item.get("channel_username") or "未知频道"
@@ -199,20 +288,11 @@ class AIService:
         result = await self._call_api(messages, max_tokens=256)
         return result.get("content", "")
 
-    async def chat(
-        self,
-        user_question: str,
-        context_results: Optional[list] = None,
-    ) -> dict:
-        """
-        AI 对话：根据知识库回答问题
-        返回: {"content": str, "input_tokens": int, "output_tokens": int}
-        """
+    async def chat(self, user_question: str, context_results: Optional[list] = None) -> dict:
         if not self.is_configured():
             return {
-                "content": "❌ AI 功能未配置，请联系管理员设置 API Key",
-                "input_tokens": 0,
-                "output_tokens": 0,
+                "content": "❌ AI 功能未配置，请联系管理员在后台添加 API Key",
+                "input_tokens": 0, "output_tokens": 0,
             }
 
         context = ""
@@ -235,21 +315,7 @@ class AIService:
         result = await self._call_api(messages, max_tokens=512)
         return result
 
-    async def smart_search(
-        self,
-        keyword: str,
-        results: list,
-    ) -> dict:
-        """
-        智能搜索增强：扩展关键词 + 总结结果
-        返回: {
-            "original_keyword": str,
-            "expanded_keywords": list,
-            "summary": str,
-            "search_hint": str,
-            "result_count": int,
-        }
-        """
+    async def smart_search(self, keyword: str, results: list) -> dict:
         expanded = await self.expand_keyword(keyword)
         related = expanded.get("related_keywords", [keyword])
         summary = ""
@@ -264,6 +330,34 @@ class AIService:
             "result_count": len(results),
         }
 
+    async def health_check(self) -> dict:
+        """检测所有 API 的健康状态"""
+        results = []
+        for key_conf in self._api_keys:
+            api_key = key_conf.get("api_key", "")
+            api_base = key_conf.get("api_base", "")
+            model = key_conf.get("model", "deepseek-chat")
+            name = key_conf.get("name", "未命名")
+            if not api_key or not api_base:
+                results.append({"name": name, "status": "no_config", "elapsed_ms": 0})
+                continue
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    t0 = __import__("time").perf_counter()
+                    resp = await client.post(
+                        f"{api_base.rstrip('/')}/chat/completions",
+                        headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
+                        json={"model": model, "messages": [{"role": "user", "content": "hi"}], "max_tokens": 5},
+                    )
+                    elapsed = int((__import__("time").perf_counter() - t0) * 1000)
+                    results.append({
+                        "name": name, "api_base": api_base, "model": model,
+                        "status": "ok" if resp.status_code == 200 else f"error_{resp.status_code}",
+                        "elapsed_ms": elapsed,
+                    })
+            except Exception as e:
+                results.append({"name": name, "status": f"error: {str(e)[:50]}", "elapsed_ms": 0})
+        return {"keys": results, "healthy_count": sum(1 for r in results if r["status"] == "ok")}
 
-# 全局实例
+
 ai_service = AIService()

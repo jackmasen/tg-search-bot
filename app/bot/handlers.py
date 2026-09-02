@@ -569,6 +569,7 @@ async def ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         result = await ai_service.chat(question, context_text)
         content = result.get("content", "AI 未返回内容")
         model_name = result.get("model", "unknown")
+        pool_used = result.get("pool_used", "")
         input_tokens = result.get("input_tokens", 0)
         output_tokens = result.get("output_tokens", 0)
 
@@ -584,12 +585,13 @@ async def ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             content = content[:1997] + "..."
 
         remaining = free_limit - ai_stat["count"] if free_limit > 0 else "∞"
+        pool_label = f"接口：{pool_used} | " if pool_used else ""
         reply_text = (
             f"🤖 **AI 回答**\n\n"
             f"💬 {question}\n\n"
             f"{content}\n\n"
             f"──\n"
-            f"模型：{model_name} | 消耗：{input_tokens + output_tokens} tokens | 剩余：{remaining}"
+            f"模型：{model_name} | {pool_label}消耗：{input_tokens + output_tokens} tokens | 剩余：{remaining}"
         )
         await thinking_msg.edit_text(reply_text, parse_mode="Markdown")
 
