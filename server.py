@@ -4713,10 +4713,14 @@ async def api_admin_ops_git_version_history(request: Request):
 @app.post("/api/admin/monitor/share")
 async def api_admin_monitor_share(request: Request):
     """创建监视分享链接，默认有效期30分钟"""
-    if not _verify_admin_session(str(request.query_params.get("session_id", ""))):
-        return JSONResponse({"ok": False, "error": "未登录"}, status_code=401)
     try:
         body = await request.json()
+    except Exception:
+        body = {}
+    session_id = str(body.get("session_id", "") or request.query_params.get("session_id", ""))
+    if not _verify_admin_session(session_id):
+        return JSONResponse({"ok": False, "error": "未登录"}, status_code=401)
+    try:
         expire_minutes = body.get("expire_minutes", 30)
         if not isinstance(expire_minutes, (int, float)) or expire_minutes < 1 or expire_minutes > 1440:
             expire_minutes = 30
