@@ -95,11 +95,19 @@ class VersionManager:
             )
             await db.commit()
 
-        # 3. 执行git pull
+        # 3. 执行git pull（自动处理本地未提交修改）
         self._ensure_git_safe()
         try:
+            # 先 stash 本地未提交的修改
+            subprocess.run(
+                ["git", "stash", "push", "-m", f"pre_update_stash_{datetime.now().strftime('%Y%m%d%H%M%S')}"],
+                cwd=self.project_root,
+                capture_output=True,
+                timeout=30,
+            )
+
             result = subprocess.run(
-                ["git", "pull", "origin", "main"],
+                ["git", "pull", "--autostash", "origin", "main"],
                 cwd=self.project_root,
                 capture_output=True,
                 text=True,
@@ -107,10 +115,20 @@ class VersionManager:
             )
 
             if result.returncode != 0:
-                logger.error(f"git pull失败: {result.stderr}")
-                if auto_rollback:
-                    await self._auto_rollback(backup_id, "git pull失败")
-                return {"success": False, "error": result.stderr, "backup_id": backup_id}
+                # pull 失败，尝试硬重置到远端
+                logger.warning("git pull 失败，尝试 git reset --hard origin/main...")
+                reset_result = subprocess.run(
+                    ["git", "reset", "--hard", "origin/main"],
+                    cwd=self.project_root,
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                )
+                if reset_result.returncode != 0:
+                    logger.error(f"git reset 也失败: {reset_result.stderr}")
+                    if auto_rollback:
+                        await self._auto_rollback(backup_id, "git pull失败")
+                    return {"success": False, "error": result.stderr, "backup_id": backup_id}
 
             # 4. 安装新依赖
             subprocess.run(
