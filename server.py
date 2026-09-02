@@ -4710,10 +4710,9 @@ async def search_messages(keyword: str, limit=5):
     async with get_db() as db:
         cur = await db.execute(
             """SELECT c.id, c.title, c.username, c.target_url, c.member_count,
-                    c.category, c.description, c.status, c.is_featured
+                    c.category, c.description, c.is_featured
              FROM channels c
              WHERE (c.title LIKE ? OR c.description LIKE ? OR c.username LIKE ?)
-               AND c.status = 'active'
              ORDER BY c.is_featured DESC, c.sort_order ASC, c.id ASC
              LIMIT ?""",
             (kw, kw, kw, limit)
