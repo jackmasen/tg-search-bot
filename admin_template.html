@@ -248,6 +248,7 @@ input:focus, select:focus, textarea:focus { outline:none; border-color:#38bdf8; 
             </div>
           </div>
         </div>
+      </section>
 
       <!-- Tab1: 用户管理 -->
       <section id="tab-users" class="tab-panel">
@@ -1430,7 +1431,13 @@ input:focus, select:focus, textarea:focus { outline:none; border-color:#38bdf8; 
 </div>
 
 <script>
-// ============ 全局：登录状态 ============
+// ============ 全局：异常兜底 + 登录状态 ============
+window.addEventListener('error', function(e) {
+  console.error('[GLOBAL ERROR]', e.message, 'at', e.filename, ':' + e.lineno + ':' + e.colno, e.error && e.error.stack);
+});
+window.addEventListener('unhandledrejection', function(e) {
+  console.error('[GLOBAL UNHANDLED REJECTION]', e.reason && (e.reason.message || e.reason));
+});
 const SESSION_KEY = 'demo_admin_session';
 const ADMIN_SESSION = () => localStorage.getItem(SESSION_KEY) || '';
 
@@ -1588,6 +1595,7 @@ document.querySelectorAll('#sideNav a').forEach(a => {
 // ============ 全局数据容器 ============
 let D = null;
 let charts = {};
+function $el(id) { const e = document.getElementById(id); if (!e) console.warn('[$el] missing #'+id); return e; }
 
 // ============ 工具函数：adminFetch / toast ============
 async function adminFetch(url, body, method, timeoutMs=30000) {
@@ -1650,6 +1658,8 @@ async function refreshDashboard() {
 
 // ---------- Tab0 总览 ----------
 function renderOverview() {
+  try {
+  if (!D) return;
   document.getElementById('st-users').textContent = D.total_users.toLocaleString();
   document.getElementById('st-users-today').textContent = `+${D.users_today} 今日新增`;
   document.getElementById('st-recharge').textContent = D.total_recharge.toFixed(2);
@@ -1660,6 +1670,7 @@ function renderOverview() {
   document.getElementById('st-ch').textContent = `订阅 ${D.total_channels} 个频道`;
 
   // 金融图表
+  try {
   if (charts.finance) charts.finance.destroy();
   charts.finance = new Chart(document.getElementById('chartFinance'), {
     type:'bar', data: {
@@ -1671,7 +1682,9 @@ function renderOverview() {
     },
     options: chartOpts()
   });
+  } catch(e) { console.error('chartFinance render error:', e); }
   // 用户余额榜
+  try {
   if (charts.users) charts.users.destroy();
   const topUsers = D.top_users || [];
   charts.users = new Chart(document.getElementById('chartUsers'), {
@@ -1681,6 +1694,7 @@ function renderOverview() {
     },
     options: chartOpts(true)
   });
+  } catch(e) { console.error('chartUsers render error:', e); }
 
   // 充值流水mini
   document.getElementById('table-recharge-mini').innerHTML = (D.recent_recharges||[]).map(r => `
@@ -1701,10 +1715,13 @@ function renderOverview() {
       <td class="text-right ${(a.ctr||0)>=0.03?'text-emerald-400':'text-slate-400'}">${((a.ctr||0)*100).toFixed(1)}%</td>
       <td class="text-center">${adStatusBadge(a.status)}</td>
     </tr>`).join('');
+  } catch(e) { console.error('renderOverview error:', e); }
 }
 
 // ---------- Tab1 用户 ----------
 function renderUsers() {
+  try {
+  if (!D) return;
   const kw = (document.getElementById('userSearch')?.value || '').toLowerCase();
   const fl = document.getElementById('userFilter')?.value || 'all';
   let rows = [...(D.users||[])];
@@ -1725,10 +1742,13 @@ function renderUsers() {
       <td class="text-right text-sky-300">${u.invited_count||0}</td>
       <td class="text-xs text-slate-500">${String(u.created_at||'').slice(5,16)}</td>
     </tr>`).join('');
+  } catch(e) { console.error('renderUsers error:', e); }
 }
 
 // ---------- Tab2 频道（增删改） ----------
 function renderChannels() {
+  try {
+  if (!D) return;
   const list = [...(D.channels||[])].sort((a,b) => (a.sort_order||0)-(b.sort_order||0) || b.id-a.id);
   const total = list.length;
   const featured = list.filter(c => c.is_featured).length;
@@ -1764,6 +1784,7 @@ function renderChannels() {
         <button onclick="deleteChannelById(${c.id})" class="text-xs bg-rose-700/70 hover:bg-rose-600 px-2 py-1 rounded ml-1">删除</button>
       </td>
     </tr>`).join('');
+  } catch(e) { console.error('renderChannels error:', e); }
 }
 
 // ---- 频道 CRUD ----
@@ -1876,6 +1897,8 @@ function deleteChannelById(id) {
 
 // ---------- Tab3 广告 ----------
 function renderAds() {
+  try {
+  if (!D) return;
   const list = D.campaigns_full || [];
   document.getElementById('ad-total').textContent = list.length;
   const spent = list.reduce((s,c)=>s+(+c.daily_spent||0),0);
@@ -1916,10 +1939,13 @@ function renderAds() {
       </td>
     </tr>`;
   }).join('');
+  } catch(e) { console.error('renderAds error:', e); }
 }
 
 // ---------- Tab4 充值 ----------
 function renderRecharge() {
+  try {
+  if (!D) return;
   document.getElementById('table-recharge-full').innerHTML = (D.recharges||[]).map(r => `
     <tr class="border-b border-slate-800 hover:bg-slate-800/40 text-xs">
       <td class="py-2.5 px-4 font-mono text-sky-300">${r.order_no}</td>
@@ -1930,10 +1956,13 @@ function renderRecharge() {
       <td class="text-[11px] text-slate-500">${String(r.created_at||'').slice(5,16)}</td>
       <td class="text-[11px] text-slate-500">${r.confirmed_at?String(r.confirmed_at).slice(5,16):'<span class="text-slate-600">-</span>'}</td>
     </tr>`).join('');
+  } catch(e) { console.error('renderRecharge error:', e); }
 }
 
 // ---------- Tab5 流水 ----------
 function renderTx() {
+  try {
+  if (!D) return;
   document.getElementById('table-tx').innerHTML = (D.transactions||[]).map(t => `
     <tr class="border-b border-slate-800 hover:bg-slate-800/40 text-xs">
       <td class="py-2.5 px-4 text-slate-500 font-mono">#${t.id}</td>
@@ -1944,10 +1973,13 @@ function renderTx() {
       <td class="text-[11px] text-slate-400 max-w-[260px] truncate" title="${t.description||''}">${t.description||'-'}</td>
       <td class="text-[11px] text-slate-500">${String(t.created_at||'').slice(5,16)}</td>
     </tr>`).join('');
+  } catch(e) { console.error('renderTx error:', e); }
 }
 
 // ---------- Tab6 系统 ----------
 function renderSystem() {
+  try {
+  if (!D) return;
   const s = D.system || {};
   document.getElementById('system-cards').innerHTML = [
     ['🟢 机器人', s.bot_status, s.version],
@@ -1985,16 +2017,20 @@ function renderSystem() {
       <td class="text-center">${a.status}</td>
       <td class="text-slate-500">${a.last_active}</td>
     </tr>`).join('');
+  } catch(e) { console.error('renderSystem error:', e); }
 }
 
 // ---------- TabOps 监视面板 ----------
 let _opsCharts = { newUsers: null, searches: null };
 async function loadOpsMonitor() {
+  try {
   const r = await adminFetch('/api/dashboard', {}, 'GET', 15000);
   if (!r.ok || !r.data) return;
   const D = r.data;
   const s = D.system || {};
-  document.getElementById('ops-monitor-cards').innerHTML = [
+  const mc = document.getElementById('ops-monitor-cards');
+  if (!mc) return;
+  mc.innerHTML = [
     ['🤖 机器人', s.bot_status, ''],
     ['🕷 采集器', s.crawler_status, ''],
     ['💵 充值扫描', s.recharge_scanner, ''],
@@ -2020,6 +2056,7 @@ async function loadOpsMonitor() {
     type:'line', data: {labels: D.last7_dates, datasets: [{label:'搜索次数', data:D.last7_searches, borderColor:'#34d399', backgroundColor:'rgba(52,211,153,.15)', tension:.3, fill:true}]},
     options: chartOpts()
   });
+  } catch(e) { console.error('loadOpsMonitor error:', e); }
 }
 
 async function generateMonitorShare() {
@@ -2275,6 +2312,7 @@ let HW_CATEGORIES = [];
 let HW_CATEGORY_ICONS = {'加密货币':'💰','AI人工智能':'🤖','Web3/DeFi':'🌐','NFT/元宇宙':'🎨','量化交易':'📈','空投/薅羊毛':'🎁','编程开发':'💻','科技前沿':'🚀'};
 
 async function loadHotKeywords() {
+  try {
   // 加载分类
   const cats = await adminFetch('/api/admin/hot_keyword_categories');
   if (cats && cats.ok) {
@@ -2364,6 +2402,7 @@ async function loadHotKeywords() {
       </div>
     `;
   }).join('');
+  } catch(e) { console.error('loadHotKeywords error:', e); }
 }
 
 function openHotwordModal() {
@@ -2601,6 +2640,7 @@ function proxyModeBadge(m){
   return '<span class="badge bg-slate-700 text-slate-300">直连</span>';
 }
 async function loadCrawlers() {
+  try {
   const d = await adminFetch('/api/admin/crawler_accounts');
   if (!d.ok) return;
   const body = document.getElementById('table-crawler');
@@ -2632,6 +2672,7 @@ async function loadCrawlers() {
       </td>
     </tr>
   `).join('');
+  } catch(e) { console.error('loadCrawlers error:', e); }
 }
 function openCrawlerModal(isEdit=false, a=null){
   // 重置所有字段
@@ -2989,9 +3030,11 @@ async function testProxyFromModal(){
 
 // ============ 代理管理 ============
 async function loadProxies(){
+  try {
   const r = await adminFetch('/api/admin/crawler_proxies');
   const list = document.getElementById('proxy-list');
   const empty = document.getElementById('proxy-empty');
+  if (!list || !empty) return;
   if (!r.ok || !r.proxies || r.proxies.length === 0){
     list.innerHTML = '';
     empty.classList.remove('hidden');
@@ -3014,6 +3057,7 @@ async function loadProxies(){
       <div class="text-slate-600 mt-1">${p.last_test_at||'未检测'}</div>
     </div>
   `).join('');
+  } catch(e) { console.error('loadProxies error:', e); }
 }
 function editProxy(pid){ switchProxyTab('manual'); openProxyModalInternal(pid); }
 function openProxyModal(pid=null){
@@ -3278,11 +3322,14 @@ function menuTypeBadge(t){
   return `<span class="badge ${x[0]}">${x[1]}</span>`;
 }
 async function loadMenus(){
+  try {
   const d = await adminFetch('/api/admin/bot_menus');
   if (!d.ok) return;
   const all = d.menus || [];
+  const body = document.getElementById('ops-menu-body');
+  if (!body) return;
   // 表格：按 parent_id 分组，按 sort_order
-  document.getElementById('ops-menu-body').innerHTML = all.map(m => `
+  body.innerHTML = all.map(m => `
     <tr>
       <td class="font-mono">${m.id}</td>
       <td>
@@ -3305,6 +3352,7 @@ async function loadMenus(){
   `).join('');
   // 预览：按 parent_id 分组
   renderMenuPreview(all);
+  } catch(e) { console.error('loadMenus error:', e); }
 }
 function renderMenuPreview(all){
   const byParent = {};
@@ -3702,10 +3750,13 @@ async function loadGitHistory(){
   }).join('');
 }
 async function loadVersions(){
+  try {
   const r = await adminFetch('/api/admin/ops/versions');
   if (!r.ok) return;
   // ChangeLog 时间线
-  document.getElementById('ops-changelog').innerHTML = (r.changelog||[]).map(c=>`
+  const cl = document.getElementById('ops-changelog');
+  if (!cl) return;
+  cl.innerHTML = (r.changelog||[]).map(c=>`
     <div class="flex gap-3 mb-3">
       <div class="text-right font-mono text-xs w-20 text-slate-400 shrink-0">${c.when||''}</div>
       <div class="flex-1 border-l-2 border-slate-700 pl-3">
@@ -3737,6 +3788,7 @@ async function loadVersions(){
           '<span class="text-xs text-slate-500">当前版本</span>'}
       </td>
     </tr>`).join('');
+  } catch(e) { console.error('loadVersions error:', e); }
 }
 async function submitUpdate(e){
   e.preventDefault();
@@ -4050,21 +4102,26 @@ function _renderEnvOnly() {
 }
 
 async function loadSettings() {
+  try {
   const r = await adminFetch('/api/admin/settings/groups');
   if (!r.ok) return toast(r.error||'加载失败','error');
   _SETTINGS_STATE.groups = r.groups || [];
   _SETTINGS_STATE.env_only = r.env_only || {};
   _SETTINGS_STATE.active_group = 0;
   // 顶部信息
-  document.getElementById('settings-version').textContent = r.app_version || '-';
+  const verEl = document.getElementById('settings-version');
+  if (verEl) verEl.textContent = r.app_version || '-';
   const totalEditable = _SETTINGS_STATE.groups.reduce((s,g)=>s+g.items.filter(i=>!i.forbidden).length,0);
-  document.getElementById('settings-editable-count').textContent = totalEditable;
+  const ecEl = document.getElementById('settings-editable-count');
+  if (ecEl) ecEl.textContent = totalEditable;
   // 描述
   const rd = (await adminFetch('/api/admin/settings/describe').catch(()=>{return {summary:{}}})) || {summary:{}};
-  document.getElementById('settings-rule').textContent = (rd.summary||{}).rule || '';
+  const ruleEl = document.getElementById('settings-rule');
+  if (ruleEl) ruleEl.textContent = (rd.summary||{}).rule || '';
   _renderGroupTabs();
   _renderForm();
   _renderEnvOnly();
+  } catch(e) { console.error('loadSettings error:', e); }
 }
 
 async function saveAllSettings(event) {
