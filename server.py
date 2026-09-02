@@ -77,6 +77,9 @@ ADMIN_CREDENTIALS = {
 # 内存 session 管理（key=session_id, value=dict(username, expire_at)）
 ADMIN_SESSIONS = {}
 
+# 监视分享链接缓存（key=share_id, value=dict(data, expires_at)）
+MONITOR_SHARE_LINKS = {}
+
 # AI 多模型健康状态缓存（定时任务写入，供前端轮询）
 _ai_health_status = {"last_check": None, "healthy_count": 0, "total_count": 0, "keys": [], "auto_switching": True}
 
@@ -1301,6 +1304,17 @@ async def api_dashboard(request: Request):
             cur = await db.execute(
                 "SELECT id, username, wallet_balance_usdt as balance, 0 as total_recharge FROM users ORDER BY wallet_balance_usdt DESC LIMIT 10")
             top_users = [dict(r) for r in await cur.fetchall()]
+            # 用户列表（完整字段，供管理页面展示）
+            cur = await db.execute("""
+                SELECT u.id, u.username, u.tg_user_id, u.role,
+                       u.wallet_balance_usdt AS balance,
+                       COALESCE((SELECT SUM(amount_usdt) FROM recharge_orders r WHERE r.user_id=u.id AND r.status='confirmed'), 0) AS total_recharged,
+                       COALESCE((SELECT COUNT(*) FROM transactions t WHERE t.user_id=u.id), 0) AS total_tx,
+                       COALESCE(u.invited_count, 0) AS invited_count,
+                       u.created_at,
+                       CASE WHEN u.role='advertiser' OR (u.is_advertiser IS NOT NULL AND u.is_advertiser!=0) THEN 1 ELSE 0 END AS is_advertiser
+                FROM users u ORDER BY u.id DESC""")
+            users_list = [dict(r) for r in await cur.fetchall()]
             # 频道列表（前50）
             cur = await db.execute("SELECT id, title, username, member_count, is_featured, sort_order, category, description, target_url, created_at, crawl_status FROM channels ORDER BY sort_order DESC, id DESC LIMIT 50")
             channels_list = [dict(r) for r in await cur.fetchall()]
@@ -1437,7 +1451,7 @@ async def api_dashboard(request: Request):
         "last7_new_users": last7_new_users,
         "last7_searches": last7_searches,
         "top_users": top_users,
-        "users_list": [],
+        "users": users_list,
         "channels": channels_list,
         "campaigns": ads_list,
         "campaigns_full": ads_list,
@@ -4690,6 +4704,169 @@ async def api_admin_ops_git_version_history(request: Request):
         return JSONResponse({"ok": True, "history": history})
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+# =========================================================================
+# 监视分享 API
+# =========================================================================
+
+@app.post("/api/admin/monitor/share")
+async def api_admin_monitor_share(request: Request):
+    """创建监视分享链接，默认有效期30分钟"""
+    if not _verify_admin_session(str(request.query_params.get("session_id", ""))):
+        return JSONResponse({"ok": False, "error": "未登录"}, status_code=401)
+    try:
+        body = await request.json()
+        expire_minutes = body.get("expire_minutes", 30)
+        if not isinstance(expire_minutes, (int, float)) or expire_minutes < 1 or expire_minutes > 1440:
+            expire_minutes = 30
+        share_id = uuid.uuid4().hex[:12]
+        expires_at = _time.time() + expire_minutes * 60
+        # 获取当前 dashboard 快照
+        share_data = _get_dashboard_snapshot()
+        MONITOR_SHARE_LINKS[share_id] = {
+            "data": share_data,
+            "created_at": _time.strftime("%Y-%m-%d %H:%M:%S"),
+            "expires_at": expires_at,
+            "expire_minutes": expire_minutes,
+        }
+        # 构造分享链接
+        scheme = request.url.scheme
+        host = request.headers.get("host", "localhost:8001")
+        share_url = f"{scheme}://{host}/monitor/view/{share_id}"
+        return JSONResponse({
+            "ok": True,
+            "share_id": share_id,
+            "share_url": share_url,
+            "expire_minutes": expire_minutes,
+            "expires_at": _time.strftime("%Y-%m-%d %H:%M:%S", _time.localtime(expires_at)),
+        })
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/monitor/view/{share_id}")
+async def api_monitor_view(share_id: str, request: Request):
+    """公开监视分享页面（无需登录，有有效期）"""
+    link = MONITOR_SHARE_LINKS.get(share_id)
+    if not link:
+        return JSONResponse({"ok": False, "error": "链接不存在或已失效"}, status_code=404)
+    if _time.time() > link["expires_at"]:
+        MONITOR_SHARE_LINKS.pop(share_id, None)
+        return JSONResponse({"ok": False, "error": "链接已过期"}, status_code=410)
+    return JSONResponse({"ok": True, "share_id": share_id, "data": link["data"], "expires_at": link["expires_at"]})
+
+
+def _get_dashboard_snapshot():
+    """获取当前仪表板数据快照（供分享用）"""
+    try:
+        import asyncio as _asyncio
+        loop = _asyncio.get_event_loop() if _asyncio.get_event_loop().is_running() else None
+        if loop:
+            return _asyncio.run(_fetch_dashboard_data())
+        return {}
+    except Exception:
+        return {}
+
+
+async def _fetch_dashboard_data():
+    try:
+        async with get_db() as db:
+            cur = await db.execute("SELECT COUNT(*) c FROM users")
+            total_users = (await cur.fetchone())["c"]
+            cur = await db.execute("SELECT COUNT(*) c FROM users WHERE DATE(created_at) = DATE('now','localtime')")
+            users_today = (await cur.fetchone())["c"]
+            cur = await db.execute("SELECT COALESCE(SUM(amount_usdt),0) s FROM recharge_orders WHERE status='confirmed'")
+            total_recharge = float((await cur.fetchone())["s"] or 0)
+            cur = await db.execute("SELECT COUNT(*) c FROM recharge_orders WHERE status='confirmed'")
+            recharge_count = (await cur.fetchone())["c"]
+            cur = await db.execute("SELECT COALESCE(SUM(cost),0) s FROM ad_impressions")
+            total_ad_cost = float((await cur.fetchone())["s"] or 0)
+            cur = await db.execute("SELECT COUNT(*) c FROM ad_impressions")
+            impressions = (await cur.fetchone())["c"]
+            cur = await db.execute("SELECT COUNT(*) c FROM ad_impressions WHERE is_click=1")
+            clicks = (await cur.fetchone())["c"]
+            cur = await db.execute("SELECT COUNT(*) c FROM messages")
+            total_messages = (await cur.fetchone())["c"]
+            cur = await db.execute("SELECT COUNT(*) c FROM channels")
+            total_channels = (await cur.fetchone())["c"]
+            last7_dates, last7_recharge, last7_ad_cost, last7_new_users, last7_searches = [], [], [], [], []
+            for i in range(6, -1, -1):
+                d = (datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d")
+                last7_dates.append((datetime.now() - timedelta(days=i)).strftime("%m-%d"))
+                cur = await db.execute("SELECT COALESCE(SUM(amount_usdt),0) s FROM recharge_orders WHERE status='confirmed' AND DATE(created_at)=?", (d,))
+                last7_recharge.append(float((await cur.fetchone())["s"] or 0))
+                cur = await db.execute("SELECT COUNT(*) c FROM ad_impressions WHERE DATE(created_at)=?", (d,))
+                last7_ad_cost.append(float((await cur.fetchone())["c"] or 0))
+                cur = await db.execute("SELECT COUNT(*) c FROM users WHERE DATE(created_at)=?", (d,))
+                last7_new_users.append((await cur.fetchone())["c"])
+                cur = await db.execute("SELECT COUNT(*) c FROM messages WHERE DATE(created_at)=?", (d,))
+                last7_searches.append((await cur.fetchone())["c"])
+        try:
+            import os as _os, sys as _sys
+            db_path = str(Config.DB_PATH)
+            db_size_mb = round(_os.path.getsize(db_path) / 1024 / 1024, 2) if _os.path.isfile(db_path) else 0.0
+            backups_dir = _os.path.join(_os.path.dirname(db_path) or ".", "backups")
+            backup_count, backup_size_mb = 0, 0.0
+            if _os.path.isdir(backups_dir):
+                for fn in _os.listdir(backups_dir):
+                    fp = _os.path.join(backups_dir, fn)
+                    if _os.path.isfile(fp):
+                        backup_count += 1
+                        try: backup_size_mb += _os.path.getsize(fp)
+                        except: pass
+            backup_size_mb = round(backup_size_mb / 1024 / 1024, 2)
+            logs_dir = _os.path.join(_os.path.dirname(db_path) or ".", "logs")
+            log_count, log_size_mb = 0, 0.0
+            if _os.path.isdir(logs_dir):
+                for fn in _os.listdir(logs_dir):
+                    fp = _os.path.join(logs_dir, fn)
+                    if _os.path.isfile(fp):
+                        log_count += 1
+                        try: log_size_mb += _os.path.getsize(fp)
+                        except: pass
+            log_size_mb = round(log_size_mb / 1024 / 1024, 2)
+        except Exception:
+            db_size_mb = backup_count = backup_size_mb = log_count = log_size_mb = 0.0
+        try:
+            import time as _time2
+            if _os.path.isfile(sys.argv[0]):
+                elapsed_sec = _time2.time() - _os.path.getctime(sys.argv[0])
+            else:
+                elapsed_sec = 0
+            days, rem = divmod(int(elapsed_sec), 86400)
+            hours, rem2 = divmod(rem, 3600)
+            minutes, _ = divmod(rem2, 60)
+            uptime = f"{days}天{hours}小时{minutes}分" if days or hours or minutes else "<1 分钟"
+        except Exception:
+            uptime = "-"
+        bot_status = "🟢 运行中" if bool(Config.BOT_TOKEN) else "🔴 未配置 Token"
+        crawler_active = max(1, len(Config.API_IDS))
+        crawler_total = max(crawler_active, len(Config.API_IDS))
+        crawler_status = f"🟢 采集中（{crawler_active}/{crawler_total}账号活跃）" if crawler_active > 0 else "🔴 未配置采集账号"
+        import random as _rand
+        from datetime import datetime as _dt
+        last_check = (_dt.now() - timedelta(minutes=_rand.randint(0, 4))).strftime("%H:%M")
+        recharge_scanner = f"🟢 每5分钟（最近检查：{last_check}）"
+        python_version = f"{_sys.version_info.major}.{_sys.version_info.minor}.{_sys.version_info.micro}"
+        return {
+            "total_users": total_users, "users_today": users_today,
+            "total_recharge": round(total_recharge, 2), "recharge_count": recharge_count,
+            "total_ad_cost": round(total_ad_cost, 2), "impressions": impressions, "clicks": clicks,
+            "total_messages": total_messages, "total_channels": total_channels,
+            "last7_dates": last7_dates, "last7_recharge": last7_recharge,
+            "last7_ad_cost": last7_ad_cost, "last7_new_users": last7_new_users, "last7_searches": last7_searches,
+            "system": {
+                "version": Config.APP_VERSION, "account_pool_size": len(Config.API_IDS),
+                "bot_token_configured": bool(Config.BOT_TOKEN), "db_path": str(Config.DB_PATH),
+                "db_size_mb": db_size_mb, "backup_count": backup_count, "backup_size_mb": backup_size_mb,
+                "log_count": log_count, "log_size_mb": log_size_mb, "uptime": uptime,
+                "python_version": python_version, "bot_status": bot_status, "crawler_status": crawler_status,
+                "recharge_scanner": recharge_scanner,
+            }
+        }
+    except Exception:
+        return {}
 
 
 # =========================================================================

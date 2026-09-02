@@ -50,18 +50,14 @@ input:focus, select:focus, textarea:focus { outline:none; border-color:#38bdf8; 
     <form onsubmit="doLogin(event)" class="space-y-4">
       <div>
         <label class="text-xs text-slate-400 mb-1 block">管理员账号</label>
-        <input id="loginUser" type="text" value="admin" class="w-full" autocomplete="username" required>
+        <input id="loginUser" type="text" class="w-full" autocomplete="username" required>
       </div>
       <div>
         <label class="text-xs text-slate-400 mb-1 block">管理员密码</label>
-        <input id="loginPass" type="password" value="demo123456" class="w-full" autocomplete="current-password" required>
+        <input id="loginPass" type="password" class="w-full" autocomplete="current-password" required>
       </div>
       <div id="loginErr" class="hidden text-xs text-rose-400"></div>
       <button type="submit" class="btn-primary w-full py-2.5 rounded-lg text-white font-semibold">🔐 登录后台</button>
-      <div class="text-[11px] text-slate-500 text-center leading-relaxed pt-2 border-t border-slate-700">
-        默认账号：<code class="text-sky-400">admin</code> / 密码：<code class="text-sky-400">demo123456</code><br>
-        生产环境请改为.env强密码 + 加盐哈希存储
-      </div>
     </form>
   </div>
 </div>
@@ -252,7 +248,6 @@ input:focus, select:focus, textarea:focus { outline:none; border-color:#38bdf8; 
             </div>
           </div>
         </div>
-      </section>
 
       <!-- Tab1: 用户管理 -->
       <section id="tab-users" class="tab-panel">
@@ -728,6 +723,48 @@ input:focus, select:focus, textarea:focus { outline:none; border-color:#38bdf8; 
                 <tr><td colspan="5" class="text-center text-slate-500 py-3">点上面的「立即备份」或「刷新」生成</td></tr>
               </tbody>
             </table>
+          </div>
+        </div>
+
+        <!-- 🖥 系统监视可视化 + 分享 -->
+        <div class="card rounded-xl p-5 mb-5">
+          <div class="flex items-center justify-between mb-4">
+            <div class="text-sm font-semibold">🖥 系统监视 · 运行总览 <span class="text-xs text-slate-400 font-normal ml-1">（实时数据快照，支持生成分享链接）</span></div>
+            <button onclick="loadOpsMonitor()" class="text-xs text-sky-400 hover:text-sky-300">🔄 刷新数据</button>
+          </div>
+
+          <!-- 状态卡片 -->
+          <div id="ops-monitor-cards" class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4"></div>
+
+          <!-- 趋势图表 -->
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+            <div class="border border-slate-700 rounded-xl p-4">
+              <div class="text-xs font-semibold mb-2">📈 近7天新增用户</div>
+              <canvas id="opsChartNewUsers" height="160"></canvas>
+            </div>
+            <div class="border border-slate-700 rounded-xl p-4">
+              <div class="text-xs font-semibold mb-2">🔍 近7天搜索量</div>
+              <canvas id="opsChartSearches" height="160"></canvas>
+            </div>
+          </div>
+
+          <!-- 分享链接 -->
+          <div class="border border-slate-700 rounded-xl p-4">
+            <div class="text-xs font-semibold mb-3">🔗 生成监视分享链接 <span class="text-xs text-slate-400 font-normal">（有效期默认30分钟，最多1440分钟）</span></div>
+            <div class="flex flex-wrap items-end gap-3">
+              <div>
+                <label class="text-xs text-slate-400 block mb-1">有效期（分钟）</label>
+                <input id="ops-share-expire" type="number" value="30" min="1" max="1440" class="w-24 text-sm">
+              </div>
+              <button onclick="generateMonitorShare()" id="btn-gen-share" class="btn-primary !py-2 !px-5 text-sm">🔗 生成分享链接</button>
+            </div>
+            <div id="ops-share-result" class="mt-3 hidden">
+              <div class="flex items-center gap-2">
+                <input id="ops-share-url" readonly class="flex-1 text-xs font-mono bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sky-300">
+                <button onclick="copyOpsShareUrl()" class="btn-sky !py-1.5 !px-3 text-xs">📋 复制</button>
+              </div>
+              <div id="ops-share-expire-info" class="text-[11px] text-slate-500 mt-1"></div>
+            </div>
           </div>
         </div>
       </section>
@@ -1535,12 +1572,15 @@ document.querySelectorAll('#sideNav a').forEach(a => {
     a.classList.remove('text-slate-400');
     const tab = a.dataset.tab;
     document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-    document.getElementById('tab-' + tab).classList.add('active');
-    // 切换到对应tab时自动加载数据
-    if (tab === 'crawler' && typeof loadCrawler === 'function') { loadCrawler(); loadProxies(); }
+    const panel = document.getElementById('tab-' + tab);
+    if (panel) panel.classList.add('active');
+    // 所有 tab 切换时统一刷新数据，确保各页面有内容
+    refreshDashboard();
+    // 特殊 tab 额外加载
+    if (tab === 'crawler' && typeof loadCrawlers === 'function') { loadCrawlers(); loadProxies(); }
     if (tab === 'botmenu' && typeof loadMenus === 'function') loadMenus();
     if (tab === 'settings' && typeof loadSettings === 'function') loadSettings();
-    if (tab === 'ops' && typeof loadEnvCheck === 'function') { loadEnvCheck(); loadVersions(); loadBackups(); }
+    if (tab === 'ops' && typeof loadEnvCheck === 'function') { loadEnvCheck(); loadVersions(); loadBackups(); loadOpsMonitor(); }
     if (tab === 'hotwords' && typeof loadHotKeywords === 'function') loadHotKeywords();
   });
 });
@@ -1947,6 +1987,73 @@ function renderSystem() {
     </tr>`).join('');
 }
 
+// ---------- TabOps 监视面板 ----------
+let _opsCharts = { newUsers: null, searches: null };
+async function loadOpsMonitor() {
+  const r = await adminFetch('/api/dashboard', {}, 'GET', 15000);
+  if (!r.ok || !r.data) return;
+  const D = r.data;
+  const s = D.system || {};
+  document.getElementById('ops-monitor-cards').innerHTML = [
+    ['🤖 机器人', s.bot_status, ''],
+    ['🕷 采集器', s.crawler_status, ''],
+    ['💵 充值扫描', s.recharge_scanner, ''],
+    ['⌛ 运行时长', s.uptime, ''],
+    ['👥 总用户', D.total_users+' 人', '今日 +'+D.users_today],
+    ['💰 总充值', D.total_recharge.toFixed(2)+' U', D.recharge_count+' 笔'],
+    ['📊 总搜索', D.total_messages+' 次', D.total_channels+' 频道'],
+    ['💿 数据库', s.db_size_mb+' MB', s.backup_count+' 备份'],
+  ].map(([t,v,sub]) => `
+    <div class="card rounded-xl p-3">
+      <div class="text-xs text-slate-400">${t}</div>
+      <div class="text-sm font-bold mt-0.5">${v}</div>
+      <div class="text-[10px] text-slate-500 mt-0.5">${sub}</div>
+    </div>`).join('');
+
+  if (_opsCharts.newUsers) _opsCharts.newUsers.destroy();
+  _opsCharts.newUsers = new Chart(document.getElementById('opsChartNewUsers'), {
+    type:'line', data: {labels: D.last7_dates, datasets: [{label:'新增用户', data:D.last7_new_users, borderColor:'#818cf8', backgroundColor:'rgba(129,140,248,.15)', tension:.3, fill:true}]},
+    options: chartOpts()
+  });
+  if (_opsCharts.searches) _opsCharts.searches.destroy();
+  _opsCharts.searches = new Chart(document.getElementById('opsChartSearches'), {
+    type:'line', data: {labels: D.last7_dates, datasets: [{label:'搜索次数', data:D.last7_searches, borderColor:'#34d399', backgroundColor:'rgba(52,211,153,.15)', tension:.3, fill:true}]},
+    options: chartOpts()
+  });
+}
+
+async function generateMonitorShare() {
+  const expireMinutes = parseInt(document.getElementById('ops-share-expire').value) || 30;
+  const btn = document.getElementById('btn-gen-share');
+  btn.disabled = true;
+  btn.textContent = '⏳ 生成中...';
+  try {
+    const r = await adminFetch('/api/admin/monitor/share', {expire_minutes: expireMinutes}, 'POST');
+    if (!r.ok || !r.data) { alert('生成失败：' + (r.error||'未知错误')); return; }
+    const d = r.data;
+    document.getElementById('ops-share-url').value = d.share_url;
+    document.getElementById('ops-share-expire-info').textContent =
+      `有效期 ${d.expire_minutes} 分钟，截止时间：${d.expires_at}`;
+    document.getElementById('ops-share-result').classList.remove('hidden');
+  } catch(e) {
+    alert('生成失败：' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🔗 生成分享链接';
+  }
+}
+
+function copyOpsShareUrl() {
+  const input = document.getElementById('ops-share-url');
+  input.select();
+  navigator.clipboard.writeText(input.value).then(() => {
+    const btn = event.target;
+    const orig = btn.textContent;
+    btn.textContent = '✅ 已复制';
+    setTimeout(() => btn.textContent = orig, 1500);
+  });
+}
+
 // ---------- 工具函数 ----------
 function chartOpts(horizontal=false) {
   return {
@@ -2008,6 +2115,17 @@ const ALL_SIDEBAR = [
   ['botmenu','🧭 机器人菜单','botmenu'],
   ['maintenance','🛠 升级维护','ops'],
 ];
+function switchTab(tab) {
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  const el = document.getElementById('tab-' + tab);
+  if (el) el.classList.add('active');
+  // 切换到对应tab时自动加载数据
+  if (tab === 'crawler') { if (typeof loadCrawler === 'function') { loadCrawler(); loadProxies(); } }
+  if (tab === 'botmenu') { if (typeof loadMenus === 'function') loadMenus(); }
+  if (tab === 'settings') { if (typeof loadSettings === 'function') loadSettings(); }
+  if (tab === 'ops') { if (typeof loadEnvCheck === 'function') { loadEnvCheck(); loadVersions(); loadBackups(); loadOpsMonitor(); } }
+  if (tab === 'hotwords') { if (typeof loadHotKeywords === 'function') loadHotKeywords(); }
+}
 function renderSidebar(active='overview') {
   const sb = document.getElementById('sidebarList');
   if (!sb) return;
@@ -2020,10 +2138,12 @@ function setActive(k) {
   document.querySelectorAll('#sidebarList .nav-item').forEach(n => n.classList.remove('active'));
   const idx = ALL_SIDEBAR.findIndex(x=>x[0]===k);
   if (idx>=0) document.querySelectorAll('#sidebarList .nav-item')[idx]?.classList.add('active');
-  // 额外：如果切换到小号/菜单/维护，立即拉一次数据
+  // 统一刷新数据，确保所有 tab 都有内容
+  refreshDashboard();
+  // 特殊 tab 额外加载
   if (k==='crawler') { loadCrawlers(); loadProxies(); }
   if (k==='botmenu') loadMenus();
-  if (k==='maintenance') { loadEnvCheck(); loadVersions(); loadBackups(); }
+  if (k==='maintenance') { loadEnvCheck(); loadVersions(); loadBackups(); loadOpsMonitor(); }
   if (k==='hotwords') loadHotKeywords();
 }
 
