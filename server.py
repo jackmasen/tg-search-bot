@@ -4920,7 +4920,8 @@ async def api_monitor_view(share_id: str, request: Request):
     if _time.time() > link["expires_at"]:
         MONITOR_SHARE_LINKS.pop(share_id, None)
         return JSONResponse({"ok": False, "error": "链接已过期"}, status_code=410)
-    return JSONResponse({"ok": True, "share_id": share_id, "data": link["data"], "expires_at": link["expires_at"]})
+    expires_at_str = link.get("expires_at_str") or _time.strftime("%Y-%m-%d %H:%M:%S", _time.localtime(link["expires_at"]))
+    return JSONResponse({"ok": True, "share_id": share_id, "data": link["data"], "expires_at": expires_at_str})
 
 
 async def _get_dashboard_snapshot():
