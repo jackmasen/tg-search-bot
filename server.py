@@ -442,17 +442,13 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans
 .cmd-btn {{ transition: all 0.15s; }}
 .switch-user select {{ background:#0e1621; color:#fff; border:1px solid #2b5278; }}
 .ad-card {{ background: linear-gradient(90deg,#1e3a5f 0%, #2b5278 100%); }}
-/* 广告行：垂直结构，一行一个广告，从左到右逐行显示 */
-.ad-row {{ display:flex; flex-direction:column; gap:4px; padding:8px 12px; border-radius:10px; margin-bottom:6px; background:linear-gradient(90deg,#1e3a5f 0%, #2b5278 100%); border:1px solid rgba(255,255,255,0.08); font-size:13px; line-height:1.5; }}
-.ad-row-top {{ display:flex; align-items:flex-start; gap:8px; width:100%; }}
-.ad-rank {{ color:#7dd3fc; font-weight:bold; min-width:22px; text-align:center; flex-shrink:0; font-size:12px; padding-top:1px; }}
-.ad-title {{ color:#fff; font-weight:600; cursor:pointer; text-decoration:none; word-break:break-all; line-height:1.35; flex:1; }}
+/* 广告行：单行横向紧凑布局，手机屏幕一行显示 */
+.ad-row {{ display:flex; flex-direction:row; align-items:center; gap:6px; padding:7px 10px; border-radius:10px; margin-bottom:5px; background:linear-gradient(90deg,#1e3a5f 0%, #2b5278 100%); border:1px solid rgba(255,255,255,0.08); font-size:12px; }}
+.ad-title {{ color:#fff; font-weight:600; cursor:pointer; text-decoration:none; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:0 1 45%; line-height:1.4; font-size:12px; }}
 .ad-title:hover {{ text-decoration:underline; }}
-.ad-desc {{ color:#cbd5e1; font-size:11px; line-height:1.45; opacity:0.92; padding-left:30px; word-break:break-all; }}
-.ad-tags {{ display:flex; flex-wrap:wrap; gap:4px; padding-left:30px; }}
-.ad-tag {{ font-size:11px; padding:1px 6px; border-radius:10px; white-space:nowrap; }}
-.ad-actions {{ display:flex; flex-wrap:wrap; gap:4px; padding-left:30px; }}
-.ad-action {{ font-size:11px; padding:2px 10px; border-radius:6px; white-space:nowrap; cursor:pointer; }}
+.ad-desc {{ color:#94a3b8; font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:1 1 35%; line-height:1.4; }}
+.ad-action {{ font-size:11px; padding:2px 10px; border-radius:6px; white-space:nowrap; cursor:pointer; flex-shrink:0; background:linear-gradient(135deg,#059669,#10b981); color:#fff; text-decoration:none; }}
+.ad-action:hover {{ background:linear-gradient(135deg,#047857,#059669); }}
 /* 热门搜索：一行一个分类，分类标签左对齐，关键词一行从左到右排列 */
 .hot-kw-section {{ margin-top:6px; }}
 .hot-kw-row {{ display:flex; align-items:center; gap:6px; margin-bottom:5px; padding:2px 0; }}
@@ -463,14 +459,10 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans
 .hot-kw-chip:hover {{ background:#475569; border-color:#64748b; }}
 /* 移动端响应式：手机屏幕自适应 */
 @media (max-width: 480px) {{
-  .ad-row {{ padding:6px 8px; font-size:12px; }}
-  .ad-rank {{ min-width:18px; font-size:11px; }}
-  .ad-title {{ font-size:12px; }}
-  .ad-desc {{ font-size:10px; padding-left:26px; }}
-  .ad-tags {{ padding-left:26px; }}
-  .ad-tag {{ font-size:10px; padding:1px 4px; }}
-  .ad-actions {{ padding-left:26px; }}
-  .ad-action {{ font-size:10px; padding:1px 6px; }}
+  .ad-row {{ padding:5px 8px; font-size:11px; gap:4px; }}
+  .ad-title {{ font-size:11px; flex:0 1 40%; }}
+  .ad-desc {{ font-size:10px; flex:1 1 30%; }}
+  .ad-action {{ font-size:10px; padding:1px 7px; }}
   .hot-kw-label {{ min-width:72px; font-size:10px; }}
   .hot-kw-chip {{ font-size:10px; padding:1px 6px; }}
   .chat-bubble-bot, .chat-bubble-user {{ max-width:94%!important; font-size:12px; }}
@@ -5757,29 +5749,15 @@ async def _build_start_html(u, balance, featured_ads, hot_keywords_by_cat):
                 username = ''
             category = html.escape(ad.get('category', ''))
             members = ad.get('member_count', 0)
-            rank = f'{idx}' if idx <= 3 else str(idx)
-            rank_color = 'text-yellow-300' if idx == 1 else ('text-gray-300' if idx == 2 else ('text-amber-600' if idx == 3 else 'text-slate-400'))
             featured_badge = ' ⭐' if ad.get('is_featured') else ''
-            tags_html = ''
-            tags_parts = []
-            if category:
-                tags_parts.append(f'<span class="ad-tag bg-sky-800/60 text-sky-200">{html.escape(category)}</span>')
-            if members:
-                tags_parts.append(f'<span class="ad-tag bg-slate-700/60 text-slate-300">👥{members}</span>')
-            if username:
-                tags_parts.append(f'<span class="ad-tag bg-indigo-800/60 text-indigo-200">{html.escape(username)}</span>')
-            if tags_parts:
-                tags_html = f'<div class="ad-tags">{"".join(tags_parts)}</div>'
-            desc_html = f'<div class="ad-desc">{desc}</div>' if desc else ''
-            action_btn = f'<div class="ad-actions"><a href="{url}" target="_blank" class="ad-action bg-emerald-600 hover:bg-emerald-500 text-white">👉 加入</a></div>' if url and url != '#' else ''
+            # 描述截断为单行（最多40字符）
+            desc_short = desc[:40] + '…' if len(desc) > 40 else desc
+            desc_html = f'<span class="ad-desc">{desc_short}</span>' if desc else ''
+            action_btn = f'<a href="{url}" target="_blank" class="ad-action">👉 加入</a>' if url and url != '#' else ''
             featured_ads_html += f'''
                     <div class="ad-row">
-                        <div class="ad-row-top">
-                            <span class="ad-rank {rank_color}">{rank}</span>
-                            <a href="{url}" target="_blank" class="ad-title" title="{desc}">{title}{featured_badge}</a>
-                        </div>
+                        <a href="{url}" target="_blank" class="ad-title" title="{desc}">{title}{featured_badge}</a>
                         {desc_html}
-                        {tags_html}
                         {action_btn}
                     </div>'''
         featured_ads_html += '</div>'
