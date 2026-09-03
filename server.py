@@ -458,8 +458,23 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans
 .hot-kw-row {{ display:flex; align-items:center; gap:6px; margin-bottom:5px; padding:2px 0; }}
 .hot-kw-label {{ font-size:11px; color:#94a3b8; min-width:92px; flex-shrink:0; }}
 .hot-kw-chips {{ display:flex; flex-wrap:wrap; gap:4px; flex:1; }}
-.hot-kw-chip {{ font-size:11px; background:#334155; color:#e2e8f0; padding:2px 8px; border-radius:999px; white-space:nowrap; border:1px solid #475569; cursor:pointer; }}
+.hot-kw-chip {{ font-size:11px; background:#334155; color:#e2e8f0; padding:2px 8px; border-radius:999px;
+                   white-space:nowrap; border:1px solid #475569; cursor:pointer; }}
 .hot-kw-chip:hover {{ background:#475569; border-color:#64748b; }}
+/* 移动端响应式：手机屏幕自适应 */
+@media (max-width: 480px) {{
+  .ad-row {{ padding:6px 8px; font-size:12px; }}
+  .ad-rank {{ min-width:18px; font-size:11px; }}
+  .ad-title {{ font-size:12px; }}
+  .ad-desc {{ font-size:10px; padding-left:26px; }}
+  .ad-tags {{ padding-left:26px; }}
+  .ad-tag {{ font-size:10px; padding:1px 4px; }}
+  .ad-actions {{ padding-left:26px; }}
+  .ad-action {{ font-size:10px; padding:1px 6px; }}
+  .hot-kw-label {{ min-width:72px; font-size:10px; }}
+  .hot-kw-chip {{ font-size:10px; padding:1px 6px; }}
+  .chat-bubble-bot, .chat-bubble-user {{ max-width:94%!important; font-size:12px; }}
+}}
 </style>
 </head>
 <body class="min-h-screen">
@@ -4936,6 +4951,66 @@ async def api_admin_ops_bot_push_search(request: Request):
     except Exception as e:
         return JSONResponse({"ok": False, "error": f"HTTP 请求失败：{str(e)[:100]}"}, status_code=500)
     return JSONResponse({"ok": ok_count > 0, "sent_count": ok_count, "results": results_list, "keyword": keyword, "result_count": len(results)})
+
+
+@app.post("/api/admin/bot_push_start_page")
+async def api_admin_bot_push_start_page(request: Request):
+    """一键推送同步：将演示页面的 /start 响应HTML推送到管理员Telegram，用于验证Bot侧展示效果"""
+    try:
+        p = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "格式错误"}, status_code=400)
+    if not _verify_admin_session(str(p.get("session_id", ""))):
+        return JSONResponse({"ok": False, "error": "未登录"}, status_code=401)
+    token = Config.BOT_TOKEN
+    if not token:
+        return JSONResponse({"ok": False, "error": "TG_BOT_TOKEN 未配置"}, status_code=400)
+    admins = Config.ADMIN_TG_IDS or []
+    if not admins:
+        return JSONResponse({"ok": False, "error": "ADMIN_TG_IDS 未配置"}, status_code=400)
+    # 调用 /api/bot/command 获取 /start 的完整响应
+    import httpx as _hx
+    try:
+        async with _hx.AsyncClient(timeout=_hx.Timeout(15.0, connect=8.0)) as client:
+            cmd_res = await client.post(
+                "http://127.0.0.1:8001/api/bot/command",
+                json={"command": "/start", "tg_user_id": int(admins[0])},
+            )
+        cmd_data = cmd_res.json() if cmd_res.ok else {}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": f"调用Bot命令接口失败：{str(e)[:100]}"}, status_code=500)
+    reply_html = cmd_data.get("reply_html", "")
+    if not reply_html:
+        return JSONResponse({"ok": False, "error": "未获取到Bot响应内容"}, status_code=500)
+    # 截取前2000字符发送（Telegram消息长度限制4096）
+    preview_text = reply_html[:2000]
+    push_msg = f"📱 <b>Bot 首页同步预览</b>\n\n{preview_text}"
+    results_list = []
+    ok_count = 0
+    try:
+        async with _hx.AsyncClient(timeout=_hx.Timeout(15.0, connect=8.0)) as client:
+            for uid in admins:
+                try:
+                    r = await client.post(
+                        f"https://api.telegram.org/bot{token}/sendMessage",
+                        json={"chat_id": int(uid), "text": push_msg, "parse_mode": "HTML"},
+                    )
+                    data = r.json()
+                    if data.get("ok"):
+                        ok_count += 1
+                        results_list.append(f"✅ 推送至管理员 {uid} 成功")
+                    else:
+                        results_list.append(f"⚠️ 推送至 {uid} 失败：{data.get('description','')}")
+                except Exception as e:
+                    results_list.append(f"❌ 推送至 {uid} 异常：{str(e)[:60]}")
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": f"HTTP 请求失败：{str(e)[:100]}"}, status_code=500)
+    return JSONResponse({
+        "ok": ok_count > 0,
+        "sent_count": ok_count,
+        "results": results_list,
+        "html_length": len(reply_html),
+    })
 
 
 # =========================================================================

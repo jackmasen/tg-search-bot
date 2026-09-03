@@ -22,6 +22,14 @@ input, select, textarea { background:#0f172a; color:#e2e8f0; border:1px solid #3
 input:focus, select:focus, textarea:focus { outline:none; border-color:#38bdf8; box-shadow: 0 0 0 2px rgba(56,189,248,.2); }
 .btn-primary { background: linear-gradient(135deg,#0ea5e9,#6366f1); }
 .btn-primary:hover { filter: brightness(1.1); }
+.btn-sky { background: linear-gradient(135deg,#0284c7,#0ea5e9); }
+.btn-sky:hover { filter: brightness(1.1); }
+.btn-rose { background: linear-gradient(135deg,#e11d48,#f43f5e); }
+.btn-rose:hover { filter: brightness(1.1); }
+.btn-amber { background: linear-gradient(135deg,#d97706,#f59e0b); }
+.btn-amber:hover { filter: brightness(1.1); }
+.btn-indigo { background: linear-gradient(135deg,#4f46e5,#6366f1); }
+.btn-indigo:hover { filter: brightness(1.1); }
 /* AI 模型健康状态灯 */
 .ai-dot { width:10px; height:10px; border-radius:50%; display:inline-block; flex-shrink:0; }
 .ai-dot.green { background:#22c55e; box-shadow: 0 0 6px #22c55e; }
@@ -615,6 +623,14 @@ input:focus, select:focus, textarea:focus { outline:none; border-color:#38bdf8; 
             <div class="text-xs text-slate-400 mb-4">向管理员 Telegram 发送测试消息，验证 Bot 消息通道是否正常</div>
             <button id="btn-bot-push" onclick="botPushTest()" class="btn-sky w-full !py-2 text-sm">📤 发送测试消息</button>
             <div id="bot-push-result" class="text-xs mt-3 space-y-1"></div>
+          </div>
+
+          <!-- 一键推送同步演示界面到Bot -->
+          <div class="card rounded-xl p-5">
+            <div class="text-sm font-semibold mb-2">🔄 一键推送同步演示界面</div>
+            <div class="text-xs text-slate-400 mb-4">将当前演示页面的 /start 响应HTML推送至管理员Telegram，验证Bot侧实际展示效果（含广告卡片、热搜关键词等）</div>
+            <button id="btn-bot-sync-start" onclick="botSyncStartPage()" class="btn-indigo w-full !py-2 text-sm">🔄 推送 /start 首页到 Bot</button>
+            <div id="bot-sync-start-result" class="text-xs mt-3 space-y-1"></div>
           </div>
 
           <!-- 修复 Telethon 账号池 -->
@@ -3714,6 +3730,38 @@ async function botPushTest(){
     : `<div class="text-slate-400 mt-2">⚠️ 未成功推送任何消息，请检查配置</div>`;
   if(out) out.innerHTML = lines.join('') + hint;
   toast(r.sent_count > 0 ? '✅ 推送成功，请查看 Telegram' : '⚠️ 推送无成功结果', r.sent_count > 0 ? 'success' : 'warning');
+}
+async function botSyncStartPage(){
+  const btn = document.getElementById('btn-bot-sync-start');
+  if(btn){ btn.disabled = true; btn.style.opacity = '0.5'; btn.style.pointerEvents = 'none'; btn.textContent = '⏳ 推送中...'; }
+  const out = document.getElementById('bot-sync-start-result');
+  if(out) out.innerHTML = '<div class="text-amber-300">🔄 正在调用Bot首页接口并推送至Telegram...</div>';
+  try {
+    const r = await adminFetch('/api/admin/bot_push_start_page', {}, 'POST');
+    if(btn){ btn.disabled = false; btn.style.opacity = ''; btn.style.pointerEvents = ''; btn.textContent = '🔄 推送 /start 首页到 Bot'; }
+    if(!r){
+      if(out) out.innerHTML = '<div class="text-rose-300">❌ 请求失败</div>';
+      toast('❌ 请求失败', 'error'); return;
+    }
+    if(!r.ok){
+      if(out) out.innerHTML = `<div class="text-rose-300">❌ ${r.error||'推送失败'}</div>`;
+      toast('❌ ' + (r.error||'推送失败'), 'error'); return;
+    }
+    const lines = (r.results||[]).map(x =>
+      x.startsWith('✅') ? `<div class="text-emerald-300">${x}</div>`
+      : x.startsWith('❌') ? `<div class="text-rose-300">${x}</div>`
+      : `<div class="text-amber-300">${x}</div>`
+    );
+    const hint = r.sent_count > 0
+      ? `<div class="text-slate-400 mt-2">✅ 已推送 /start 首页至 ${r.sent_count} 个管理员（HTML长度 ${r.html_length||0} 字符），请查看 Telegram</div>`
+      : `<div class="text-slate-400 mt-2">⚠️ 未成功推送，请检查配置</div>`;
+    if(out) out.innerHTML = lines.join('') + hint;
+    toast(r.sent_count > 0 ? '✅ 首页推送成功，请查看 Telegram' : '⚠️ 推送无成功结果', r.sent_count > 0 ? 'success' : 'warning');
+  } catch(e){
+    if(btn){ btn.disabled = false; btn.style.opacity = ''; btn.style.pointerEvents = ''; btn.textContent = '🔄 推送 /start 首页到 Bot'; }
+    if(out) out.innerHTML = `<div class="text-rose-300">❌ ${e.message||'推送失败'}</div>`;
+    toast('❌ 推送失败', 'error');
+  }
 }
 async function fixTelethonConfig(){
   const btn = document.getElementById('btn-fix-telethon');
