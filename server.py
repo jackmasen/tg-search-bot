@@ -4926,7 +4926,8 @@ function renderCharts(D){
 function renderAll(){
   if(!dashboardData) return;
   const D = dashboardData;
-  const diag = diagnosticData;
+  const diag = diagnosticData||{};
+  try{
   const app = document.getElementById('app');
   const sysGrid = buildSysGrid(D, diag);
   const issues = buildIssues(diag);
@@ -4957,6 +4958,7 @@ function renderAll(){
     ${logHtml ? '<div class="log-section"><h3>📋 最近错误日志</h3>'+logHtml+'</div>' : ''}
   `;
   renderCharts(D);
+  }catch(e){console.error('renderAll error:',e);}
 }
 
 fetchData();
