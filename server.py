@@ -4968,21 +4968,23 @@ async def api_admin_bot_push_start_page(request: Request):
     admins = Config.ADMIN_TG_IDS or []
     if not admins:
         return JSONResponse({"ok": False, "error": "ADMIN_TG_IDS 未配置"}, status_code=400)
-    # 调用 /api/bot/command 获取 /start 的完整响应
+    # 直接内联 /start 逻辑，避免同进程HTTP自调
     import httpx as _hx
-    try:
-        async with _hx.AsyncClient(timeout=_hx.Timeout(15.0, connect=8.0)) as client:
-            cmd_res = await client.post(
-                "http://127.0.0.1:8001/api/bot/command",
-                json={"command": "/start", "tg_user_id": int(admins[0])},
-            )
-        cmd_data = cmd_res.json() if cmd_res.ok else {}
-    except Exception as e:
-        return JSONResponse({"ok": False, "error": f"调用Bot命令接口失败：{str(e)[:100]}"}, status_code=500)
-    reply_html = cmd_data.get("reply_html", "")
+    tg_uid = int(admins[0])
+    u = await wallet_manager.get_or_create_user(tg_uid)
+    balance = await wallet_manager.get_balance(tg_uid)
+    ad_limit = Config.FEATURED_AD_LIMIT
+    featured_ads = []
+    async with get_db() as db:
+        cur = await db.execute(
+            """SELECT * FROM channels WHERE is_featured = 1 ORDER BY sort_order ASC, id ASC LIMIT ?""",
+            (ad_limit,)
+        )
+        featured_ads = [dict(row) for row in await cur.fetchall()]
+    hot_keywords_by_cat = await ad_manager.get_hot_keywords_by_category()
+    reply_html, actions = await _build_start_html(u, balance, featured_ads, hot_keywords_by_cat)
     if not reply_html:
         return JSONResponse({"ok": False, "error": "未获取到Bot响应内容"}, status_code=500)
-    # 截取前2000字符发送（Telegram消息长度限制4096）
     preview_text = reply_html[:2000]
     push_msg = f"📱 <b>Bot 首页同步预览</b>\n\n{preview_text}"
     results_list = []
@@ -5734,6 +5736,108 @@ async def _verify_campaign_owner(tg_user_id: int, campaign_id: int) -> bool:
         return row is not None
 
 
+async def _build_start_html(u, balance, featured_ads, hot_keywords_by_cat):
+    """构建 /start 命令的 HTML 响应内容"""
+    ad_limit = Config.FEATURED_AD_LIMIT
+    featured_ads_html = ""
+    if featured_ads:
+        featured_ads_html = '<div class="mt-3"><div class="text-xs text-sky-300 mb-2 font-semibold">📣 今日热门推荐（点击标题直达）</div>'
+        for idx, ad in enumerate(featured_ads, 1):
+            title = html.escape(ad.get('title', ''))
+            desc = html.escape(ad.get('description', ''))
+            url = html.escape(ad.get('target_url', '#'))
+            username = ad.get('username', '') or ad.get('target_channel', '')
+            if username and not username.startswith('@'):
+                username = '@' + username
+            if username and ('http' in username or len(username) > 20):
+                username = ''
+            category = html.escape(ad.get('category', ''))
+            members = ad.get('member_count', 0)
+            rank = f'{idx}' if idx <= 3 else str(idx)
+            rank_color = 'text-yellow-300' if idx == 1 else ('text-gray-300' if idx == 2 else ('text-amber-600' if idx == 3 else 'text-slate-400'))
+            featured_badge = ' ⭐' if ad.get('is_featured') else ''
+            tags_html = ''
+            tags_parts = []
+            if category:
+                tags_parts.append(f'<span class="ad-tag bg-sky-800/60 text-sky-200">{html.escape(category)}</span>')
+            if members:
+                tags_parts.append(f'<span class="ad-tag bg-slate-700/60 text-slate-300">👥{members}</span>')
+            if username:
+                tags_parts.append(f'<span class="ad-tag bg-indigo-800/60 text-indigo-200">{html.escape(username)}</span>')
+            if tags_parts:
+                tags_html = f'<div class="ad-tags">{"".join(tags_parts)}</div>'
+            desc_html = f'<div class="ad-desc">{desc}</div>' if desc else ''
+            action_btn = f'<div class="ad-actions"><a href="{url}" target="_blank" class="ad-action bg-emerald-600 hover:bg-emerald-500 text-white">👉 加入</a></div>' if url and url != '#' else ''
+            featured_ads_html += f'''
+                    <div class="ad-row">
+                        <div class="ad-row-top">
+                            <span class="ad-rank {rank_color}">{rank}</span>
+                            <a href="{url}" target="_blank" class="ad-title" title="{desc}">{title}{featured_badge}</a>
+                        </div>
+                        {desc_html}
+                        {tags_html}
+                        {action_btn}
+                    </div>'''
+        featured_ads_html += '</div>'
+
+    kw_limit = Config.HOT_KEYWORD_PER_CATEGORY_LIMIT
+    hot_kw_html = ''
+    if hot_keywords_by_cat:
+        hot_kw_html = '<div class="hot-kw-section mt-2"><div class="text-[11px] text-sky-300 mb-2 font-semibold">🚀 热门搜索</div>'
+        for cat_name, cat_data in hot_keywords_by_cat.items():
+            icon = cat_data.get("icon", "🔍")
+            keywords = cat_data.get("keywords", [])
+            if keywords:
+                chips_html = ''
+                for kw in keywords[:kw_limit]:
+                    kw_text = kw.get("keyword", "")
+                    escaped_kw = html.escape(kw_text, quote=True)
+                    chips_html += f'<button class="hot-kw-chip cmd-btn" onclick="runCmd(\'{escaped_kw}\')">{html.escape(kw_text)}</button>'
+                hot_kw_html += f'''<div class="hot-kw-row">
+                            <span class="hot-kw-label">{icon} {html.escape(cat_name)}</span>
+                            <div class="hot-kw-chips">{chips_html}</div>
+                        </div>'''
+        hot_kw_html += '</div>'
+    else:
+        default_keywords = ["比特币", "以太坊", "AI", "空投", "Python", "FastAPI"]
+        chips_html = ''.join(
+            f'<button class="hot-kw-chip cmd-btn" onclick="runCmd(\'{html.escape(kw, quote=True)}\')">🔍 {html.escape(kw)}</button>'
+            for kw in default_keywords
+        )
+        hot_kw_html = f'''<div class="hot-kw-section mt-2">
+                    <div class="text-[11px] text-sky-300 mb-2 font-semibold">🚀 热门搜索</div>
+                    <div class="hot-kw-row">
+                        <span class="hot-kw-label">🚀 默认热门</span>
+                        <div class="hot-kw-chips">{chips_html}</div>
+                    </div></div>'''
+
+    reply_html = f"""
+                👋 <b>欢迎使用 TG搜索Pro Bot</b><br>
+                <div class="bg-sky-900/40 border border-sky-600/30 rounded-lg p-2 mt-2 mb-2 text-xs">
+                    <b class="text-sky-300">🤖 我能帮你做什么：</b><br>
+                    🔍 <b>精准搜索</b>：输入关键词，秒级返回相关频道和消息<br>
+                    📢 <b>精准广告</b>：你的广告只展示给真正感兴趣的用户<br>
+                    💰 <b>低成本获客</b>：按点击付费(CPC)，预算可控，ROI可追踪<br>
+                    📊 <b>数据洞察</b>：实时广告数据、搜索热度、转化统计
+                </div>
+                <div class="text-xs text-gray-400 mb-2">
+                    👤 身份：@{u.get('username','游客')} · 💰 余额：<b class="text-yellow-300">${balance:.2f} U</b> ·
+                    📊 免费搜索：<b>5</b> 次/天
+                </div>
+                {featured_ads_html}
+                {hot_kw_html}
+                <div class="mt-3 text-xs text-gray-400">👇 选择操作：</div>"""
+
+    actions = [
+        {"text": "📊 /stats 数据统计", "cmd": "/stats"},
+        {"text": "💰 /wallet 钱包", "cmd": "/wallet"},
+        {"text": "📺 /channels 频道管理", "cmd": "/channels"},
+        {"text": "📣 /ads 广告管理", "cmd": "/ads"},
+        {"text": "📣 /advertise 广告合作", "cmd": "/advertise"},
+    ]
+    return reply_html, actions
+
+
 @app.post("/api/bot/command")
 async def api_bot_command(request: Request):
     """核心：处理聊天框里的命令或关键词搜索，返回bot响应HTML + 搜索结果 + 广告 + 按钮操作 + 充值模拟"""
@@ -5761,7 +5865,6 @@ async def api_bot_command(request: Request):
         if cmd == "/start":
             u = await wallet_manager.get_or_create_user(tg_user_id)
             balance = await wallet_manager.get_balance(tg_user_id)
-
             ad_limit = Config.FEATURED_AD_LIMIT
             featured_ads = []
             async with get_db() as db:
@@ -5773,107 +5876,9 @@ async def api_bot_command(request: Request):
                     (ad_limit,)
                 )
                 featured_ads = [dict(row) for row in await cur.fetchall()]
-
             hot_keywords_by_cat = await ad_manager.get_hot_keywords_by_category()
+            reply_html, actions = await _build_start_html(u, balance, featured_ads, hot_keywords_by_cat)
 
-            # 一行一个广告：标题行 + 描述行 + 标签行 + 操作行，从左到右整齐排列
-            featured_ads_html = ""
-            if featured_ads:
-                featured_ads_html = '<div class="mt-3"><div class="text-xs text-sky-300 mb-2 font-semibold">📣 今日热门推荐（点击标题直达）</div>'
-                for idx, ad in enumerate(featured_ads, 1):
-                    title = html.escape(ad.get('title', ''))
-                    desc = html.escape(ad.get('description', ''))
-                    url = html.escape(ad.get('target_url', '#'))
-                    username = ad.get('username', '') or ad.get('target_channel', '')
-                    if username and not username.startswith('@'):
-                        username = '@' + username
-                    if username and ('http' in username or len(username) > 20):
-                        username = ''
-                    category = html.escape(ad.get('category', ''))
-                    members = ad.get('member_count', 0)
-                    rank = f'{idx}' if idx <= 3 else str(idx)
-                    rank_color = 'text-yellow-300' if idx == 1 else ('text-gray-300' if idx == 2 else ('text-amber-600' if idx == 3 else 'text-slate-400'))
-                    featured_badge = ' ⭐' if ad.get('is_featured') else ''
-                    tags_html = ''
-                    tags_parts = []
-                    if category:
-                        tags_parts.append(f'<span class="ad-tag bg-sky-800/60 text-sky-200">{html.escape(category)}</span>')
-                    if members:
-                        tags_parts.append(f'<span class="ad-tag bg-slate-700/60 text-slate-300">👥{members}</span>')
-                    if username:
-                        tags_parts.append(f'<span class="ad-tag bg-indigo-800/60 text-indigo-200">{html.escape(username)}</span>')
-                    if tags_parts:
-                        tags_html = f'<div class="ad-tags">{"".join(tags_parts)}</div>'
-                    desc_html = f'<div class="ad-desc">{desc}</div>' if desc else ''
-                    action_btn = f'<div class="ad-actions"><a href="{url}" target="_blank" class="ad-action bg-emerald-600 hover:bg-emerald-500 text-white">👉 加入</a></div>' if url and url != '#' else ''
-                    featured_ads_html += f'''
-                    <div class="ad-row">
-                        <div class="ad-row-top">
-                            <span class="ad-rank {rank_color}">{rank}</span>
-                            <a href="{url}" target="_blank" class="ad-title" title="{desc}">{title}{featured_badge}</a>
-                        </div>
-                        {desc_html}
-                        {tags_html}
-                        {action_btn}
-                    </div>'''
-                featured_ads_html += '</div>'
-
-            # 热门搜索：每个分类一行，标签左对齐，关键词在后面从左到右排列
-            kw_limit = Config.HOT_KEYWORD_PER_CATEGORY_LIMIT
-            hot_kw_html = ''
-            if hot_keywords_by_cat:
-                hot_kw_html = '<div class="hot-kw-section mt-2"><div class="text-[11px] text-sky-300 mb-2 font-semibold">🚀 热门搜索</div>'
-                for cat_name, cat_data in hot_keywords_by_cat.items():
-                    icon = cat_data.get("icon", "🔍")
-                    keywords = cat_data.get("keywords", [])
-                    if keywords:
-                        chips_html = ''
-                        for kw in keywords[:kw_limit]:
-                            kw_text = kw.get("keyword", "")
-                            escaped_kw = html.escape(kw_text, quote=True)
-                            chips_html += f'<button class="hot-kw-chip cmd-btn" onclick="runCmd(\'{escaped_kw}\')">{html.escape(kw_text)}</button>'
-                        hot_kw_html += f'''<div class="hot-kw-row">
-                            <span class="hot-kw-label">{icon} {html.escape(cat_name)}</span>
-                            <div class="hot-kw-chips">{chips_html}</div>
-                        </div>'''
-                hot_kw_html += '</div>'
-            else:
-                default_keywords = ["比特币", "以太坊", "AI", "空投", "Python", "FastAPI"]
-                chips_html = ''.join(
-                    f'<button class="hot-kw-chip cmd-btn" onclick="runCmd(\'{html.escape(kw, quote=True)}\')">🔍 {html.escape(kw)}</button>'
-                    for kw in default_keywords
-                )
-                hot_kw_html = f'''<div class="hot-kw-section mt-2">
-                    <div class="text-[11px] text-sky-300 mb-2 font-semibold">🚀 热门搜索</div>
-                    <div class="hot-kw-row">
-                        <span class="hot-kw-label">🚀 默认热门</span>
-                        <div class="hot-kw-chips">{chips_html}</div>
-                    </div></div>'''
-
-            reply_html = f"""
-                👋 <b>欢迎使用 TG搜索Pro Bot</b><br>
-                <div class="bg-sky-900/40 border border-sky-600/30 rounded-lg p-2 mt-2 mb-2 text-xs">
-                    <b class="text-sky-300">🤖 我能帮你做什么：</b><br>
-                    🔍 <b>精准搜索</b>：输入关键词，秒级返回相关频道和消息<br>
-                    📢 <b>精准广告</b>：你的广告只展示给真正感兴趣的用户<br>
-                    💰 <b>低成本获客</b>：按点击付费(CPC)，预算可控，ROI可追踪<br>
-                    📊 <b>数据洞察</b>：实时广告数据、搜索热度、转化统计
-                </div>
-                <div class="text-xs text-gray-400 mb-2">
-                    👤 身份：@{u.get('username','游客')} · 💰 余额：<b class="text-yellow-300">${balance:.2f} U</b> ·
-                    📊 免费搜索：<b>5</b> 次/天
-                </div>
-                {featured_ads_html}
-                {hot_kw_html}
-                <div class="mt-3 text-xs text-gray-400">👇 选择操作：</div>"""
-
-            actions = [
-                {"text": "📊 /stats 数据统计", "cmd": "/stats"},
-                {"text": "💰 /wallet 钱包", "cmd": "/wallet"},
-                {"text": "📺 /channels 频道管理", "cmd": "/channels"},
-                {"text": "📣 /ads 广告管理", "cmd": "/ads"},
-                {"text": "📣 /advertise 广告合作", "cmd": "/advertise"},
-            ]
         elif cmd == "/help":
             reply_html = """📖 <b>命令总览</b><br>
 🔍 /stats - 系统数据统计<br>
