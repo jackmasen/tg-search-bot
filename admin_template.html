@@ -479,6 +479,7 @@ input:focus, select:focus, textarea:focus { outline:none; border-color:#38bdf8; 
           <div class="flex gap-2">
             <select id="bm-role" onchange="loadMenus()" class="!h-9"><option value="all">全部用户可见</option><option value="user">普通用户</option><option value="advertiser">仅广告主</option><option value="admin">仅管理员</option></select>
             <button onclick="openMenuModal()" class="btn-primary !py-2 !px-4 text-sm">➕ 新增菜单项</button>
+            <button id="btn-sync-botfather" onclick="syncMenuToBotFather()" class="!h-9 !py-2 !px-4 text-sm border border-slate-600 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200">🔄 同步到 BotFather</button>
           </div>
         </div>
         <div id="bm-summary" class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5"></div>
@@ -510,6 +511,50 @@ input:focus, select:focus, textarea:focus { outline:none; border-color:#38bdf8; 
               </div>
               <div id="bm-preview-keyboard" class="grid grid-cols-3 gap-1.5 mt-2 px-1 pb-1"></div>
             </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 搜索预览 / Bot 效果展示 -->
+      <section id="tab-searchpreview" class="tab-panel">
+        <h2 class="text-lg font-bold mb-4">🔍 搜索预览 <span class="text-sm text-slate-400 font-normal">（输入关键词，实时查看 Bot 侧搜索结果展示效果）</span></h2>
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+          <!-- 左侧：控制面板 -->
+          <div class="card rounded-xl p-5">
+            <div class="text-sm font-semibold mb-4">⌨️ 输入测试关键词</div>
+            <div class="flex gap-2 mb-4">
+              <input id="search-preview-kw" type="text" placeholder="输入关键词，如：测试、培训、游戏..." class="flex-1 !h-10 !text-sm">
+              <button onclick="runSearchPreview(document.getElementById('search-preview-kw').value)" class="btn-primary !py-2 !px-5 text-sm">🔍 搜索</button>
+            </div>
+            <div class="text-xs text-slate-400 mb-2">热门关键词（点击快速测试）：</div>
+            <div id="search-preview-hot" class="flex flex-wrap gap-1.5 mb-5"></div>
+            <div class="border-t border-slate-700 pt-4">
+              <div class="text-sm font-semibold mb-3">📤 一键推送测试</div>
+              <p class="text-xs text-slate-400 mb-3">将当前搜索预览结果推送至管理员 Telegram，验证 Bot 实际展示效果</p>
+              <button onclick="pushSearchPreview()" class="btn-sky w-full !py-2 text-sm" id="btn-push-search">📤 推送当前搜索到 TG</button>
+              <div id="push-search-result" class="text-xs mt-3 space-y-1"></div>
+            </div>
+          </div>
+          <!-- 右侧：Bot 手机预览 -->
+          <div class="lg:col-span-1">
+            <div class="text-sm font-semibold mb-3">📱 Bot 侧展示效果预览</div>
+            <div class="mx-auto max-w-[340px] bg-slate-950 rounded-3xl border border-slate-700 p-2 shadow-xl">
+              <div class="flex items-center gap-2 px-3 py-2 bg-slate-900 rounded-t-2xl text-xs">
+                <div class="w-8 h-8 rounded-full bg-gradient-to-br from-sky-400 to-indigo-500 flex items-center justify-center text-sm">🔍</div>
+                <div class="ml-1 flex-1">
+                  <div class="font-bold">TG搜索Pro Bot</div>
+                  <div class="text-emerald-400 text-[10px]">● 在线 · 索引 0+ · 消息索引 0 · 2 频道</div>
+                </div>
+                <div class="text-slate-500">演示</div>
+              </div>
+              <div class="h-[480px] bg-slate-900/30 rounded-b-2xl p-3 text-xs space-y-2 mt-1 overflow-auto" id="search-preview-chat">
+                <div class="bg-slate-800/60 rounded-2xl rounded-tl-sm px-3 py-2 max-w-[85%] text-slate-300">
+                  请输入关键词搜索，或点击热门标签快速体验 ↓
+                </div>
+              </div>
+              <div id="search-preview-actions" class="grid grid-cols-2 gap-1.5 mt-2 px-1 pb-1"></div>
+            </div>
+            <div class="mt-3 text-xs text-slate-500" id="search-preview-meta"></div>
           </div>
         </div>
       </section>
@@ -2167,6 +2212,7 @@ function switchTab(tab) {
   if (tab === 'settings') { if (typeof loadSettings === 'function') loadSettings(); }
   if (tab === 'ops') { if (typeof loadEnvCheck === 'function') { loadEnvCheck(); loadVersions(); loadBackups(); loadOpsMonitor(); } }
   if (tab === 'hotwords') { if (typeof loadHotKeywords === 'function') loadHotKeywords(); }
+  if (tab === 'searchpreview') { if (typeof loadSearchPreview === 'function') loadSearchPreview(); }
 }
 function renderSidebar(active='overview') {
   const sb = document.getElementById('sidebarList');
@@ -3326,6 +3372,20 @@ function menuTypeBadge(t){
   const x = m[t]||['bg-slate-700 text-slate-300',t||'-'];
   return `<span class="badge ${x[0]}">${x[1]}</span>`;
 }
+async function syncMenuToBotFather(){
+  const btn = document.getElementById('btn-sync-botfather');
+  if (!btn) return;
+  btn.disabled = true;
+  btn.textContent = '⏳ 同步中...';
+  const r = await adminFetch('/api/admin/bot_menu_sync', {}, 'POST');
+  if (r.ok){
+    toast('✅ '+(r.note||'已同步到 BotFather'),'success');
+  } else {
+    toast('❌ '+(r.error||'同步失败'),'error');
+  }
+  btn.disabled = false;
+  btn.textContent = '🔄 同步到 BotFather';
+}
 async function loadMenus(){
   try {
   const d = await adminFetch('/api/admin/bot_menus');
@@ -3680,6 +3740,113 @@ async function fixTelethonConfig(){
   }
   if(out) out.innerHTML = html;
   toast('✅ 账号池配置已修复，请重启 Bot 服务使配置生效', 'success');
+}
+// ── 搜索预览 ─────────────────────────────────────────────────────────
+const SEARCH_PREVIEW_HOTS = ['测试','培训','游戏','新闻','软件','Python','空投','NFT','AI','加密货币'];
+let _searchPreviewCurrent = null;
+async function loadSearchPreview(){
+  // 渲染热门标签
+  const hotEl = document.getElementById('search-preview-hot');
+  if(hotEl){
+    hotEl.innerHTML = SEARCH_PREVIEW_HOTS.map(kw =>
+      `<button onclick="runSearchPreview('${kw}')" class="px-2.5 py-1 rounded-full text-xs bg-slate-700 hover:bg-sky-700 text-slate-200 transition-colors">${kw}</button>`
+    ).join('');
+  }
+}
+async function runSearchPreview(keyword){
+  if(!keyword) return;
+  const chat = document.getElementById('search-preview-chat');
+  const actions = document.getElementById('search-preview-actions');
+  const meta = document.getElementById('search-preview-meta');
+  if(chat) chat.innerHTML = '<div class="text-slate-400 text-center py-6">⏳ 搜索中...</div>';
+  if(actions) actions.innerHTML = '';
+  if(meta) meta.textContent = '';
+  try {
+    const r = await adminFetch('/api/bot/command', { command: keyword, tg_user_id: 0 }, 'POST', 30000);
+    _searchPreviewCurrent = r;
+    if(!r){
+      if(chat) chat.innerHTML = '<div class="text-rose-300 text-center py-4">❌ 请求失败</div>';
+      return;
+    }
+    // 渲染用户消息气泡
+    let html = `<div class="bg-sky-700/30 border border-sky-600/40 rounded-2xl rounded-tr-sm px-3 py-2 self-end text-slate-100 text-xs" style="max-width:85%;margin-left:auto">🔎 ${keyword}</div>`;
+    // 渲染 Bot 回复
+    if(r.reply_html){
+      html += `<div class="bg-slate-800/80 border border-slate-700 rounded-2xl rounded-tl-sm px-3 py-2.5 text-[11px] leading-relaxed text-slate-200" style="max-width:90%">${r.reply_html}</div>`;
+    }
+    // 渲染搜索结果卡片
+    if(r.search_results && r.search_results.length > 0){
+      r.search_results.slice(0, 5).forEach(rsl => {
+        html += `<div class="bg-slate-800/50 border border-slate-700/60 rounded-xl p-2 mt-1">
+          <div class="font-semibold text-sky-300 text-xs truncate">${rsl.title||rsl.channel_name||'未知'}</div>
+          <div class="text-slate-400 text-[10px] mt-0.5 truncate">${(rsl.snippet||rsl.content||'').substring(0,80)}${(rsl.snippet||rsl.content||'').length>80?'...':''}</div>
+          <div class="flex items-center gap-2 mt-1 text-[10px] text-slate-500">
+            <span>👥 ${rsl.subscriber_count||'?'}</span>
+            <span>📅 ${rsl.date||''}</span>
+          </div>
+        </div>`;
+      });
+    }
+    // 广告/置顶提示
+    if(r.priority_ads && r.priority_ads.length > 0){
+      html += `<div class="bg-amber-900/20 border border-amber-600/30 rounded-xl p-2 mt-1">
+        <div class="text-amber-400 text-[10px] font-semibold">📣 赞助内容 (${r.priority_ads.length}条)</div>
+      </div>`;
+    }
+    if(r.priority_channels && r.priority_channels.length > 0){
+      html += `<div class="bg-indigo-900/20 border border-indigo-600/30 rounded-xl p-2 mt-1">
+        <div class="text-indigo-400 text-[10px] font-semibold">⭐ 置顶频道 (${r.priority_channels.length}个)</div>
+      </div>`;
+    }
+    if(chat) chat.innerHTML = html;
+    // 渲染操作按钮
+    if(r.actions && r.actions.length > 0){
+      if(actions) actions.innerHTML = r.actions.slice(0,6).map(a =>
+        `<button onclick="runSearchPreview('${a.cmd.replace(/'/g,"\\'")}')">${a.text}</button>`
+      ).join('');
+    }
+    // 元信息
+    const metaParts = [];
+    if(r.ai_expanded_keywords && r.ai_expanded_keywords.length) metaParts.push(`🔗 扩展词: ${r.ai_expanded_keywords.join(', ')}`);
+    if(r.ai_keyword_hint) metaParts.push(`💡 ${r.ai_keyword_hint}`);
+    if(meta) meta.textContent = metaParts.join('  ·  ');
+  } catch(e){
+    if(chat) chat.innerHTML = `<div class="text-rose-300 text-center py-4">❌ ${e.message||'搜索失败'}</div>`;
+  }
+}
+async function pushSearchPreview(){
+  const btn = document.getElementById('btn-push-search');
+  const out = document.getElementById('push-search-result');
+  if(!btn){ return; }
+  btn.disabled = true; btn.style.opacity = '0.5'; btn.style.pointerEvents = 'none'; btn.textContent = '⏳ 推送中...';
+  if(out) out.innerHTML = '<div class="text-amber-300">📤 正在推送至 Telegram...</div>';
+  const keyword = document.getElementById('search-preview-kw')?.value || '测试';
+  try {
+    const r = await adminFetch('/api/admin/ops/bot_push_search', { keyword }, 'POST', 30000);
+    if(!r){
+      if(out) out.innerHTML = '<div class="text-rose-300">❌ 请求失败</div>';
+      toast('❌ 请求失败', 'error'); return;
+    }
+    if(!r.ok){
+      if(out) out.innerHTML = `<div class="text-rose-300">❌ ${r.error||'推送失败'}</div>`;
+      toast('❌ ' + (r.error||'推送失败'), 'error'); return;
+    }
+    const lines = (r.results||[]).map(x =>
+      x.startsWith('✅') ? `<div class="text-emerald-300">${x}</div>`
+      : x.startsWith('❌') ? `<div class="text-rose-300">${x}</div>`
+      : `<div class="text-amber-300">${x}</div>`
+    );
+    const hint = r.sent_count > 0
+      ? `<div class="text-slate-400 mt-2">✅ 已推送「${keyword}」搜索到 ${r.sent_count} 个管理员 Telegram</div>`
+      : `<div class="text-slate-400 mt-2">⚠️ 未成功推送，请检查配置</div>`;
+    if(out) out.innerHTML = lines.join('') + hint;
+    toast(r.sent_count > 0 ? '✅ 已推送至 Telegram，请查看' : '⚠️ 推送无成功结果', r.sent_count > 0 ? 'success' : 'warning');
+  } catch(e){
+    if(out) out.innerHTML = `<div class="text-rose-300">❌ ${e.message||'推送失败'}</div>`;
+    toast('❌ 推送失败', 'error');
+  } finally {
+    if(btn){ btn.disabled = false; btn.style.opacity = ''; btn.style.pointerEvents = ''; btn.textContent = '📤 推送当前搜索到 TG'; }
+  }
 }
 // ── GitHub 一键更新 ─────────────────────────────────────────────────────
 async function checkGitUpdate(){

@@ -3565,6 +3565,51 @@ async def _alias_bot_menu_save(request: Request):
     return await api_admin_bot_menu_upsert(request)
 
 
+@app.post("/api/admin/bot_menu_sync")
+async def api_admin_bot_menu_sync(request: Request):
+    """将 bot_menus 表中可见菜单同步到 Telegram BotFather (setMyCommands)"""
+    try:
+        p = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "格式错误"}, status_code=400)
+    if not _verify_admin_session(str(p.get("session_id", ""))):
+        return JSONResponse({"ok": False, "error": "未登录"}, status_code=401)
+    token = Config.BOT_TOKEN
+    if not token:
+        return JSONResponse({"ok": False, "error": "TG_BOT_TOKEN 未配置"}, status_code=400)
+    async with get_db() as db:
+        cur = await db.execute(
+            "SELECT id, menu_key, title, menu_type, description, sort_order "
+            "FROM bot_menus WHERE is_visible=1 AND menu_type!='submenu' ORDER BY sort_order ASC, id ASC"
+        )
+        rows = [dict(r) for r in await cur.fetchall()]
+    if not rows:
+        return JSONResponse({"ok": True, "sent": 0, "note": "没有可见菜单，已清空 BotFather 命令列表"})
+    import httpx as _hx
+    commands = []
+    for m in rows:
+        cmd_key = m["menu_key"].strip().lower()
+        if not cmd_key:
+            continue
+        commands.append({
+            "command": "/" + cmd_key if not cmd_key.startswith("/") else cmd_key,
+            "description": (m.get("description") or m["title"])[:100],
+        })
+    try:
+        async with _hx.AsyncClient(timeout=_hx.Timeout(15.0, connect=8.0)) as client:
+            r = await client.post(
+                f"https://api.telegram.org/bot{token}/setMyCommands",
+                json={"commands": commands},
+            )
+        data = r.json()
+        if data.get("ok"):
+            return JSONResponse({"ok": True, "sent": len(commands), "note": f"已同步 {len(commands)} 条命令到 BotFather"})
+        else:
+            return JSONResponse({"ok": False, "error": data.get("description", str(data))}, status_code=500)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": f"同步失败：{str(e)[:100]}"}, status_code=500)
+
+
 # =========================================================================
 # 广告系统 API
 # =========================================================================
@@ -4752,6 +4797,87 @@ async def api_admin_ops_bot_push_test(request: Request):
     except Exception as e:
         return JSONResponse({"ok": False, "error": f"HTTP 请求失败：{str(e)[:100]}"}, status_code=500)
     return JSONResponse({"ok": ok_count > 0, "sent_count": ok_count, "results": results})
+
+
+@app.post("/api/admin/ops/bot_push_search")
+async def api_admin_ops_bot_push_search(request: Request):
+    """将指定关键词的 Bot 搜索预览推送至管理员 Telegram"""
+    try:
+        p = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "格式错误"}, status_code=400)
+    if not _verify_admin_session(str(p.get("session_id", ""))):
+        return JSONResponse({"ok": False, "error": "未登录"}, status_code=401)
+    token = Config.BOT_TOKEN
+    if not token:
+        return JSONResponse({"ok": False, "error": "TG_BOT_TOKEN 未配置"}, status_code=400)
+    admins = Config.ADMIN_TG_IDS or []
+    if not admins:
+        return JSONResponse({"ok": False, "error": "ADMIN_TG_IDS 未配置"}, status_code=400)
+    keyword = (p.get("keyword") or "测试").strip()
+    # 执行一次完整搜索，组装预览内容
+    import asyncio as _aios
+    search_data = await search_with_ads_priority(keyword, 0)
+    results = search_data["search_results"]
+    priority_ads = search_data["priority_ads"]
+    priority_channels = search_data["priority_channels"]
+    ai_kws = search_data.get("ai_expanded_keywords", [])
+    ai_hint = search_data.get("ai_keyword_hint", "")
+    # 组装推送文本
+    lines = [f"🔍 <b>搜索预览：{keyword}</b>", ""]
+    if priority_channels:
+        lines.append("⭐ <b>置顶频道</b>（共 {} 个）".format(len(priority_channels)))
+        for pc in priority_channels[:5]:
+            ch_name = pc.get("channel_name", pc.get("title", ""))
+            ch_handle = pc.get("channel_handle", "")
+            lines.append(f"  • {ch_name} <code>{ch_handle}</code>" if ch_handle else f"  • {ch_name}")
+        lines.append("")
+    if priority_ads:
+        lines.append("📣 <b>广告内容</b>（共 {} 条）".format(len(priority_ads)))
+        for pa in priority_ads[:5]:
+            lines.append(f"  • {pa.get('title', pa.get('channel_name', ''))}")
+        lines.append("")
+    if results:
+        lines.append(f"📋 <b>搜索结果</b>（共 {len(results)} 条，展示前 5）：")
+        for rsl in results[:5]:
+            title = rsl.get("title") or rsl.get("channel_name") or "未知"
+            sub = rsl.get("subscriber_count") or "?"
+            snippet = (rsl.get("snippet") or rsl.get("content") or "")[:60]
+            lines.append(f"  • <b>{title}</b> 👥{sub}")
+            if snippet:
+                lines.append(f"    {snippet}...")
+    else:
+        lines.append("⚠️ 暂无搜索结果")
+    if ai_kws:
+        lines.append("")
+        lines.append("🔗 <b>AI 扩展关键词</b>：" + "、".join(ai_kws[:6]))
+    if ai_hint:
+        lines.append(f"💡 {ai_hint}")
+    push_text = "\n".join(lines)
+    # 发送消息
+    import httpx as _hx
+    now_str = __import__('datetime').datetime.now().strftime("%Y-%m-%d %H:%M")
+    results_list = []
+    ok_count = 0
+    try:
+        async with _hx.AsyncClient(timeout=_hx.Timeout(15.0, connect=8.0)) as client:
+            for uid in admins:
+                try:
+                    r = await client.post(
+                        f"https://api.telegram.org/bot{token}/sendMessage",
+                        json={"chat_id": int(uid), "text": push_text, "parse_mode": "HTML"},
+                    )
+                    data = r.json()
+                    if data.get("ok"):
+                        ok_count += 1
+                        results_list.append(f"✅ 推送至管理员 {uid} 成功")
+                    else:
+                        results_list.append(f"⚠️ 推送至 {uid} 失败：{data.get('description','')}")
+                except Exception as e:
+                    results_list.append(f"❌ 推送至 {uid} 异常：{str(e)[:60]}")
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": f"HTTP 请求失败：{str(e)[:100]}"}, status_code=500)
+    return JSONResponse({"ok": ok_count > 0, "sent_count": ok_count, "results": results_list, "keyword": keyword, "result_count": len(results)})
 
 
 # =========================================================================
@@ -6038,7 +6164,26 @@ async def api_bot_command(request: Request):
         elif cmd == "/add":
             reply_html = f"➕ 已申请添加频道：{arg or '未指定频道链接，示例 /add https://t.me/bitcoin' }<br>采集账号池将在约{Config.JOIN_INTERVAL_SECONDS}秒后自动执行join。<br>（演示环境：不真实joinTG，只做界面演示）"
         else:
-            reply_html = f"❓ 未知命令：<code>{command_raw}</code>，输入 /help 查看命令列表，或直接输入关键词搜索。"
+            # 检查 bot_menus 表中的自定义菜单命令
+            async with get_db() as db:
+                cur = await db.execute(
+                    "SELECT id, menu_key, title, menu_type, url, callback_data, description FROM bot_menus WHERE is_visible=1 AND menu_type!='submenu' ORDER BY sort_order ASC"
+                )
+                rows = [dict(r) for r in await cur.fetchall()]
+            matched = next((m for m in rows if m["menu_key"].strip().lower() == cmd), None)
+            if matched:
+                mtype = matched.get("menu_type") or "command"
+                if mtype == "url" and matched.get("url"):
+                    reply_html = f"🔗 <b>{matched['title']}</b><br>正在跳转到：<code>{html.escape(matched['url'])}</code><br>请点击下方按钮打开："
+                    actions = [{"text": "🌐 立即访问", "url": matched["url"]}]
+                elif mtype == "callback_data" and matched.get("callback_data"):
+                    reply_html = f"📌 <b>{matched['title']}</b><br><span class='text-xs text-gray-400'>{html.escape(matched.get('description') or '')}</span>"
+                    actions = [{"text": matched["title"], "callback": matched["callback_data"]}]
+                else:
+                    reply_html = f"📋 <b>{matched['title']}</b><br><span class='text-xs text-gray-400'>{html.escape(matched.get('description') or '')}</span>"
+                    actions = []
+            else:
+                reply_html = f"❓ 未知命令：<code>{command_raw}</code>，输入 /help 查看命令列表，或直接输入关键词搜索。"
 
         return JSONResponse({
             "reply_html": reply_html,
