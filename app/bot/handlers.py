@@ -1,8 +1,11 @@
 """
 Bot命令处理器（第1步+第2步）
 搜索 + USDT充值 + 广告合作 + AI智能搜索
+同步前端页面逻辑：调用 /api/bot/command API 获取统一响应
 """
-from datetime import datetime, date
+import re
+import html
+from datetime import date
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from loguru import logger
@@ -12,74 +15,87 @@ from app.advertising.ad_manager import ad_manager
 from app.database import get_db
 from app.config import Config
 
+# Bot API 基础地址（与 server.py FastAPI 服务同一台机器）
+BOT_API_BASE = "http://127.0.0.1:8001"
 
 # 用户每日搜索计数
 _user_search_count: dict = {}
 
 
+async def _call_bot_api(command: str, tg_user_id: int) -> dict:
+    """调用 /api/bot/command 接口，返回 JSON 响应"""
+    import httpx
+    url = f"{BOT_API_BASE}/api/bot/command"
+    payload = {"command": command, "tg_user_id": tg_user_id}
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(url, json=payload)
+            if resp.status_code == 200:
+                return resp.json()
+            logger.warning(f"[bot_api] 请求失败: {resp.status_code} {resp.text[:200]}")
+            return {"reply_html": f"⚠️ 服务暂时不可用 (HTTP {resp.status_code})", "actions": []}
+    except Exception as e:
+        logger.error(f"[bot_api] 调用失败: {e}")
+        return {"reply_html": "⚠️ 网络错误，请稍后重试", "actions": []}
+
+
+def _html_to_markdown(html_text: str) -> str:
+    """把前端返回的 HTML 转成 Telegram Markdown 兼容格式"""
+    if not html_text:
+        return ""
+    # 去掉所有 class/style 属性
+    text = re.sub(r'\s+class="[^"]*"', "", html_text)
+    text = re.sub(r'\s+style="[^"]*"', "", text)
+    text = re.sub(r'\s+onclick="[^"]*"', "", text)
+    # 换行标签
+    text = text.replace("<br>", "\n").replace("<br/>", "\n").replace("<br />", "\n")
+    # 粗体
+    text = re.sub(r"<b([^>]*)>(.*?)</b>", r"**\2**", text, flags=re.DOTALL)
+    text = re.sub(r"<strong([^>]*)>(.*?)</strong>", r"**\2**", text, flags=re.DOTALL)
+    # 行内代码
+    text = re.sub(r"<code([^>]*)>(.*?)</code>", r"`\2`", text, flags=re.DOTALL)
+    text = re.sub(r"<pre([^>]*)>(.*?)</pre>", r"```\2```", text, flags=re.DOTALL)
+    # 链接
+    text = re.sub(r'<a([^>]*)href="([^"]*)"[^>]*>(.*?)</a>', r"[\3](\2)", text, flags=re.DOTALL)
+    # 清理剩余标签
+    text = re.sub(r"<[^>]+>", "", text)
+    # 解码 HTML 实体
+    text = html.unescape(text)
+    # 清理多余空行
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+def _actions_to_keyboard(actions: list) -> InlineKeyboardMarkup:
+    """把 API actions 列表转成 InlineKeyboardMarkup"""
+    if not actions:
+        return None
+    rows = []
+    for a in actions:
+        text = str(a.get("text", ""))
+        cmd = str(a.get("cmd", ""))
+        if text and cmd:
+            rows.append([InlineKeyboardButton(text, callback_data=cmd)])
+    if not rows:
+        return None
+    return InlineKeyboardMarkup(rows)
+
+
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """/start 命令"""
+    """/start 命令 — 调用 /api/bot/command 获取前端同款响应"""
     user = update.effective_user
-    # 自动注册用户
     await wallet_manager.get_or_create_user(user.id, user.username)
 
-    ad_limit = Config.FEATURED_AD_LIMIT
-    featured_channels = await ad_manager.get_featured_channels(ad_limit)
+    api_data = await _call_bot_api("/start", user.id)
+    reply_html = api_data.get("reply_html", "")
+    actions = api_data.get("actions", [])
 
-    hot_keywords_by_cat = await ad_manager.get_hot_keywords_by_category()
+    reply_md = _html_to_markdown(reply_html)
+    if not reply_md:
+        reply_md = "👋 欢迎使用 TG搜索Pro Bot！\n\n请直接发送关键词搜索或点击下方按钮操作。"
 
-    keyboard_rows = []
-    keyboard_rows.append([InlineKeyboardButton("🔍 直接搜索", callback_data="hint_search")])
-
-    # 置顶推广频道按钮（最多显示3个）
-    for idx, ch in enumerate(featured_channels[:3], 1):
-        title = ch.get('title', '') or ch.get('username', '未知频道')
-        username = ch.get('username', '')
-        if username:
-            cb = f"channel_{username}"
-        else:
-            cb = f"channel_{ch.get('id', 0)}"
-        rank_emoji = "🥇" if idx == 1 else ("🥈" if idx == 2 else "🥉" if idx == 3 else f"#{idx}")
-        keyboard_rows.append([InlineKeyboardButton(f"{rank_emoji} {title}", callback_data=cb)])
-
-    keyboard_rows.append([
-        InlineKeyboardButton("💰 我的钱包", callback_data="wallet"),
-        InlineKeyboardButton("📢 广告合作", callback_data="advertise"),
-    ])
-    keyboard_rows.append([InlineKeyboardButton("📊 数据统计", callback_data="stats")])
-
-    # 热门关键词 - 构建文字提示
-    kw_lines = []
-    kw_limit = Config.HOT_KEYWORD_PER_CATEGORY_LIMIT
-    for cat_name, cat_data in hot_keywords_by_cat.items():
-        icon = cat_data.get("icon", "🔍")
-        keywords = cat_data.get("keywords", [])
-        if keywords:
-            kw_list = [f"`{kw['keyword']}`" for kw in keywords[:kw_limit]]
-            kw_lines.append(f"{icon} **{cat_name}**：{', '.join(kw_list)}")
-    if not kw_lines:
-        default_kw = ["比特币", "以太坊", "AI", "空投", "Python", "FastAPI"]
-        kw_lines.append(f"🚀 **默认热门**：{', '.join(f'`{k}`' for k in default_kw)}")
-
-    welcome = (
-        f"👋 欢迎 **{user.first_name}**！\n\n"
-        "🔍 **TG搜索Pro机器人**\n"
-        "精准搜索TG频道/群组/消息内容\n\n"
-        f"📋 每日免费搜索：{Config.FREE_SEARCH_DAILY_LIMIT} 次\n\n"
-    )
-
-    if featured_channels:
-        welcome += "📣 **今日置顶推荐**\n点击按钮直达频道：\n\n"
-
-    welcome += "\n".join(kw_lines) + "\n\n"
-    welcome += "**使用方法：**\n"
-    welcome += "• 直接发送关键词搜索\n"
-    welcome += "• 点击置顶按钮访问推荐频道\n"
-    welcome += "• /wallet 查看钱包余额\n"
-    welcome += "• /advertise 广告合作\n"
-
-    reply_markup = InlineKeyboardMarkup(keyboard_rows)
-    await update.message.reply_text(welcome, parse_mode="Markdown", reply_markup=reply_markup)
+    keyboard = _actions_to_keyboard(actions)
+    await update.message.reply_text(reply_md, parse_mode="Markdown", reply_markup=keyboard)
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -374,12 +390,12 @@ async def ad_stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def search_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    核心搜索处理：关键词搜索 + 广告位插入（FTS5消息 + channels表兜底）
+    核心搜索处理 — 调用 /api/bot/command API（与前端页面逻辑完全一致）
     """
     keyword = update.message.text.strip()
     user_id = update.effective_user.id
 
-    # 检查每日搜索次数
+    # 检查每日搜索次数（API 内部也会检查，这里做快速拦截）
     today = date.today()
     user_stat = _user_search_count.get(user_id, {"count": 0, "date": today})
     if user_stat["date"] != today:
@@ -398,100 +414,37 @@ async def search_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     searching_msg = await update.message.reply_text(f"🔍 正在搜索 '{keyword}'...")
 
-    # 执行FTS5消息搜索
-    results = []
-    try:
-        results = await searcher.search(keyword)
-    except Exception as e:
-        logger.warning(f"[搜索] FTS5报错 {e}，走channels兜底")
+    # 调用 /api/bot/command API（与前端页面完全相同逻辑）
+    api_data = await _call_bot_api(keyword, user_id)
+    reply_html = api_data.get("reply_html", "")
+    actions = api_data.get("actions", [])
+    search_results = api_data.get("search_results", [])
+    ai_expanded_keywords = api_data.get("ai_expanded_keywords", [])
 
-    # Fallback：搜索channels表（title/description/username）
-    if not results:
-        async with get_db() as db:
-            kw = f"%{keyword}%"
-            cur = await db.execute(
-                """SELECT c.id, c.title, c.username, c.target_url, c.member_count,
-                        c.category, c.description, c.is_featured
-                 FROM channels c
-                 WHERE (c.title LIKE ? OR c.description LIKE ? OR c.username LIKE ?)
-                 ORDER BY c.is_featured DESC, c.sort_order ASC, c.id ASC
-                 LIMIT 10""",
-                (kw, kw, kw)
-            )
-            rows = await cur.fetchall()
-            results = []
-            for row in rows:
-                r = dict(row)
-                r["excerpt"] = r.get("description") or r.get("title") or ""
-                r["channel_title"] = r.get("title") or r.get("username") or "频道"
-                r["channel_username"] = r.get("username") or ""
-                r["msg_date"] = ""
-                results.append(r)
-
-    # 获取匹配广告
-    ads = []
-    try:
-        ads = await ad_manager.get_ads_for_keyword(keyword, limit=2)
-    except Exception as e:
-        logger.warning(f"[搜索] 广告查询失败 {e}")
-
-    # 记录广告曝光
-    for ad in ads:
-        try:
-            await ad_manager.record_impression(ad["id"], user_id, is_click=False, position=1)
-        except Exception:
-            pass
-
+    # 计数
     user_stat["count"] += 1
     _user_search_count[user_id] = user_stat
 
     await searching_msg.delete()
 
-    if not results and not ads:
+    if not reply_html:
         await update.message.reply_text(f"❌ 未找到 '{keyword}' 相关内容（试试：比特币/AI/空投/Python）")
         return
 
-    reply_text = f"🔎 搜索 '{keyword}' - 命中 {len(results)} 条结果"
-    if ads:
-        reply_text += f" + {len(ads)} 条广告"
-    reply_text += "\n\n"
+    reply_md = _html_to_markdown(reply_html)
+    if not reply_md:
+        reply_md = f"🔍 搜索 '{keyword}' 无结果"
 
-    # 广告位插入头部
-    if ads:
-        reply_text += "━━━━ 广告 ━━━━\n"
-        for ad in ads:
-            reply_text += (
-                f"📢 **{ad['title']}**\n"
-                f"   {ad['description']}\n"
-                f"   👉 {ad.get('target_channel', ad.get('target_url', ''))}\n\n"
-            )
-        reply_text += "━━━━━━━━━━━\n\n"
-
-    # 搜索结果（消息 + 频道兜底）
-    for i, item in enumerate(results[:8], 1):
-        excerpt = item.get("excerpt") or "（无预览）"
-        channel = item.get("channel_title") or item.get("channel_username") or "未知"
-        username = item.get("channel_username") or ""
-        date_str = (item.get("msg_date") or "")[:10]
-        target_url = item.get("target_url") or ""
-
-        # 频道结果（有target_url且无excerpt）
-        if target_url and len(excerpt) < 20:
-            reply_text += f"{i}. **{channel}**\n   👉 {target_url}\n"
-            if username:
-                reply_text += f"   @{username}\n"
-        else:
-            reply_text += f"{i}. **{channel}**\n   {excerpt}\n"
-            if date_str:
-                reply_text += f"   📅 {date_str}"
-            if username:
-                reply_text += f"  | @{username}"
-        reply_text += "\n\n"
-
+    # 添加剩余次数提示
     remaining = Config.FREE_SEARCH_DAILY_LIMIT - user_stat["count"]
-    reply_text += f"\n💡 剩余搜索：{remaining}/{Config.FREE_SEARCH_DAILY_LIMIT}"
+    if remaining > 0:
+        reply_md += f"\n\n💡 剩余搜索：{remaining}/{Config.FREE_SEARCH_DAILY_LIMIT}"
+    elif ai_expanded_keywords:
+        kw_hint = " ".join(f"`{kw}`" for kw in ai_expanded_keywords[:4])
+        reply_md += f"\n\n💡 相关搜索：{kw_hint}"
 
-    await update.message.reply_text(reply_text, parse_mode="Markdown", disable_web_page_preview=True)
+    keyboard = _actions_to_keyboard(actions)
+    await update.message.reply_text(reply_md, parse_mode="Markdown", reply_markup=keyboard)
 
 
 # ============ AI 智能搜索 ============
