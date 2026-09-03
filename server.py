@@ -4985,7 +4985,11 @@ async def api_admin_bot_push_start_page(request: Request):
     reply_html, actions = await _build_start_html(u, balance, featured_ads, hot_keywords_by_cat)
     if not reply_html:
         return JSONResponse({"ok": False, "error": "未获取到Bot响应内容"}, status_code=500)
-    preview_text = reply_html[:2000]
+    # 将HTML转换为Telegram支持的纯文本格式（移除<br>等不合法标签）
+    _sanitized = re.sub(r'<br\s*/?>', '\n', reply_html)
+    _sanitized = re.sub(r'<[^>]+>', '', _sanitized)
+    _sanitized = html.unescape(_sanitized).strip()
+    preview_text = _sanitized[:2000]
     push_msg = f"📱 <b>Bot 首页同步预览</b>\n\n{preview_text}"
     results_list = []
     ok_count = 0
