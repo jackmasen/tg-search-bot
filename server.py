@@ -4707,8 +4707,164 @@ async def api_admin_ops_git_version_history(request: Request):
 
 
 # =========================================================================
+# 监视分享 HTML 页面模板
+# =========================================================================
+SHARE_VIEW_HTML = """<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>系统监视面板</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;min-height:100vh}
+.header{background:linear-gradient(135deg,#1e293b 0%,#0f172a 100%);border-bottom:1px solid #334155;padding:16px 24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px}
+.header h1{font-size:18px;font-weight:600;color:#f1f5f9}
+.header .badge{font-size:11px;padding:3px 10px;border-radius:20px;background:#1e3a5f;color:#7dd3fc}
+.header .expired{background:#7f1d1d;color:#fca5a5}
+.container{max-width:1200px;margin:0 auto;padding:20px}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin-bottom:20px}
+.card{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:14px 16px}
+.card .label{font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
+.card .value{font-size:22px;font-weight:700;color:#f8fafc;font-variant-numeric:tabular-nums}
+.card .sub{font-size:11px;color:#64748b;margin-top:2px}
+.card.green .value{color:#34d399}
+.card.blue .value{color:#38bdf8}
+.card.amber .value{color:#fbbf24}
+.card.rose .value{color:#fb7185}
+.charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;margin-bottom:20px}
+.chart-box{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:16px}
+.chart-box h3{font-size:13px;color:#94a3b8;margin-bottom:12px;font-weight:500}
+.system{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:16px}
+.system h3{font-size:13px;color:#94a3b8;margin-bottom:12px;font-weight:500}
+.sys-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px}
+.sys-item{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #1e293b;font-size:13px}
+.sys-item .k{color:#94a3b8}
+.sys-item .v{color:#e2e8f0;font-weight:500}
+.loading{text-align:center;padding:60px 20px;color:#64748b}
+.loading .spinner{width:36px;height:36px;border:3px solid #334155;border-top-color:#38bdf8;border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 16px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.error-box{text-align:center;padding:60px 20px}
+.error-box .icon{font-size:48px;margin-bottom:16px}
+.error-box h2{color:#f8fafc;margin-bottom:8px}
+.error-box p{color:#94a3b8;font-size:14px}
+.countdown{font-size:12px;color:#64748b}
+.footer{text-align:center;padding:16px;font-size:11px;color:#475569}
+@media(max-width:600px){.cards{grid-template-columns:repeat(2,1fr)}.charts{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>📊 系统监视面板</h1>
+  <div id="expireBadge" class="badge">加载中...</div>
+</div>
+<div class="container" id="app">
+  <div class="loading"><div class="spinner"></div><div>正在加载数据...</div></div>
+</div>
+<div class="footer">TG Search System Monitor · 数据每30秒自动刷新</div>
+<script>
+const SHARE_ID = window.location.pathname.split('/').pop();
+let expireAt = null;
+let refreshTimer = null;
+
+async function fetchData(){
+  try{
+    const r = await fetch('/api/monitor/view/'+SHARE_ID);
+    if(!r.ok){
+      if(r.status===404||r.status===410){
+        showExpired(r.status===410?'链接已过期':'链接不存在或已失效');
+        return;
+      }
+      showExpired('获取数据失败 ('+r.status+')');
+      return;
+    }
+    const json = await r.json();
+    if(!json.ok){showExpired(json.error||'未知错误');return;}
+    expireAt = json.expires_at;
+    updateBadge(json.expires_at);
+    render(json.data);
+  }catch(e){showExpired('网络错误: '+e.message);}
+}
+
+function updateBadge(expStr){
+  const el = document.getElementById('expireBadge');
+  if(!expStr){el.textContent='';return;}
+  const exp = new Date(expStr.replace(' ','T')).getTime();
+  const now = Date.now();
+  const remain = Math.max(0,Math.floor((exp-now)/60000));
+  el.textContent = '⏱ 剩余 '+remain+' 分钟';
+  if(remain<5) el.className='badge expired';
+}
+
+function showExpired(msg){
+  document.getElementById('app').innerHTML =
+    '<div class="error-box"><div class="icon">⚠️</div><h2>'+msg+'</h2><p>请联系管理员重新生成分享链接</p></div>';
+}
+
+function render(D){
+  const s = D.system||{};
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <div class="cards">
+      <div class="card green"><div class="label">👥 总用户</div><div class="value">${fmt(D.total_users)}</div><div class="sub">今日 +${D.users_today}</div></div>
+      <div class="card blue"><div class="label">💰 总充值</div><div class="value">${(+D.total_recharge).toFixed(2)} U</div><div class="sub">共 ${D.recharge_count} 笔</div></div>
+      <div class="card amber"><div class="label">📊 总搜索</div><div class="value">${fmt(D.total_messages)}</div><div class="sub">${D.total_channels} 个频道</div></div>
+      <div class="card"><div class="label">💵 广告消耗</div><div class="value">${(+D.total_ad_cost).toFixed(4)}</div><div class="sub">${D.impressions} 曝光 / ${D.clicks} 点击</div></div>
+      <div class="card green"><div class="label">🤖 机器人</div><div class="value" style="font-size:14px">${s.bot_status||'-'}</div></div>
+      <div class="card blue"><div class="label">🕷 采集器</div><div class="value" style="font-size:14px">${s.crawler_status||'-'}</div></div>
+      <div class="card amber"><div class="label">💿 数据库</div><div class="value">${s.db_size_mb||0} MB</div><div class="sub">${s.backup_count||0} 备份</div></div>
+      <div class="card"><div class="label">⌛ 运行时长</div><div class="value" style="font-size:14px">${s.uptime||'-'}</div></div>
+    </div>
+    <div class="charts">
+      <div class="chart-box"><h3>📈 近7天趋势</h3><canvas id="c1"></canvas></div>
+      <div class="chart-box"><h3>👤 新增用户 / 搜索次数</h3><canvas id="c2"></canvas></div>
+    </div>
+    <div class="system">
+      <h3>🖥 系统信息</h3>
+      <div class="sys-grid">
+        <div class="sys-item"><span class="k">版本</span><span class="v">${s.version||'-'}</span></div>
+        <div class="sys-item"><span class="k">Python</span><span class="v">${s.python_version||'-'}</span></div>
+        <div class="sys-item"><span class="k">采集账号</span><span class="v">${s.account_pool_size??'-'} 个</span></div>
+        <div class="sys-item"><span class="k">充值扫描</span><span class="v">${s.recharge_scanner||'-'}</span></div>
+        <div class="sys-item"><span class="k">日志文件</span><span class="v">${s.log_count||0} 个 (${s.log_size_mb||0} MB)</span></div>
+        <div class="sys-item"><span class="k">数据库路径</span><span class="v">${(s.db_path||'').split('/').pop()||'-'}</span></div>
+      </div>
+    </div>`;
+  renderCharts(D);
+}
+
+function renderCharts(D){
+  const labels = D.last7_dates||[];
+  const opts = {responsive:true,plugins:{legend:{labels:{color:'#94a3b8',font:{size:11}}}},scales:{x:{ticks:{color:'#64748b',font:{size:10}},grid:{color:'#1e293b'}},y:{ticks:{color:'#64748b',font:{size:10}},grid:{color:'#1e293b'}}}};
+  try{
+    if(window._c1)window._c1.destroy();
+    window._c1 = new Chart(document.getElementById('c1'),{type:'bar',data:{labels,datasets:[
+      {label:'充值(USDT)',data:D.last7_recharge||[],backgroundColor:'#10b981',borderRadius:4},
+      {label:'广告消耗',data:D.last7_ad_cost||[],backgroundColor:'#f59e0b',borderRadius:4}
+    ]},options:opts});
+  }catch(e){console.error('c1 error',e);}
+  try{
+    if(window._c2)window._c2.destroy();
+    window._c2 = new Chart(document.getElementById('c2'),{type:'line',data:{labels,datasets:[
+      {label:'新增用户',data:D.last7_new_users||[],borderColor:'#818cf8',backgroundColor:'rgba(129,140,248,.15)',tension:.3,fill:true,pointRadius:3},
+      {label:'搜索次数',data:D.last7_searches||[],borderColor:'#34d399',backgroundColor:'rgba(52,211,153,.15)',tension:.3,fill:true,pointRadius:3}
+    ]},options:opts});
+  }catch(e){console.error('c2 error',e);}
+}
+
+function fmt(n){return Number(n||0).toLocaleString('zh-CN');}
+
+fetchData();
+setInterval(fetchData,30000);
+</script>
+</body>
+</html>"""
+
+# =========================================================================
 # 监视分享 API
 # =========================================================================
+
 
 @app.post("/api/admin/monitor/share")
 async def api_admin_monitor_share(request: Request):
@@ -4749,9 +4905,15 @@ async def api_admin_monitor_share(request: Request):
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
+@app.get("/monitor/view/{share_id}", response_class=HTMLResponse)
+async def monitor_view_page(share_id: str):
+    """公开监视分享页面（无需登录，有有效期）"""
+    return HTMLResponse(content=SHARE_VIEW_HTML)
+
+
 @app.get("/api/monitor/view/{share_id}")
 async def api_monitor_view(share_id: str, request: Request):
-    """公开监视分享页面（无需登录，有有效期）"""
+    """公开监视分享数据 API（无需登录，有有效期）"""
     link = MONITOR_SHARE_LINKS.get(share_id)
     if not link:
         return JSONResponse({"ok": False, "error": "链接不存在或已失效"}, status_code=404)
