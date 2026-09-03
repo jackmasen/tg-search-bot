@@ -2066,11 +2066,10 @@ async function generateMonitorShare() {
   btn.textContent = '⏳ 生成中...';
   try {
     const r = await adminFetch('/api/admin/monitor/share', {expire_minutes: expireMinutes}, 'POST');
-    if (!r.ok || !r.data) { alert('生成失败：' + (r.error||'未知错误')); return; }
-    const d = r.data;
-    document.getElementById('ops-share-url').value = d.share_url;
+    if (!r.ok || !r.share_url) { alert('生成失败：' + (r.error||'未知错误')); return; }
+    document.getElementById('ops-share-url').value = r.share_url;
     document.getElementById('ops-share-expire-info').textContent =
-      `有效期 ${d.expire_minutes} 分钟，截止时间：${d.expires_at}`;
+      `有效期 ${r.expire_minutes} 分钟，截止时间：${r.expires_at}`;
     document.getElementById('ops-share-result').classList.remove('hidden');
   } catch(e) {
     alert('生成失败：' + e.message);
