@@ -463,8 +463,8 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans
   .ad-title {{ font-size:11px; flex:0 1 40%; }}
   .ad-desc {{ font-size:10px; flex:1 1 30%; }}
   .ad-action {{ font-size:10px; padding:1px 7px; }}
-  .hot-kw-label {{ min-width:72px; font-size:10px; }}
-  .hot-kw-chip {{ font-size:10px; padding:1px 6px; }}
+  .hot-kw-label {{ min-width:64px; font-size:10px; }}
+  .hot-kw-tag {{ font-size:10px; }}
   .chat-bubble-bot, .chat-bubble-user {{ max-width:94%!important; font-size:12px; }}
 }}
 </style>
@@ -5761,33 +5761,27 @@ async def _build_start_html(u, balance, featured_ads, hot_keywords_by_cat):
     kw_limit = Config.HOT_KEYWORD_PER_CATEGORY_LIMIT
     hot_kw_html = ''
     if hot_keywords_by_cat:
-        hot_kw_html = '<div class="hot-kw-section mt-2"><div class="text-[11px] text-sky-300 mb-2 font-semibold">🚀 热门搜索</div>'
+        hot_kw_html = '<div class="hot-kw-section mt-2"><div class="text-xs text-sky-300 mb-1 font-semibold">🚀 热门搜索</div>'
         for cat_name, cat_data in hot_keywords_by_cat.items():
             icon = cat_data.get("icon", "🔍")
             keywords = cat_data.get("keywords", [])
             if keywords:
-                chips_html = ''
-                for kw in keywords[:kw_limit]:
-                    kw_text = kw.get("keyword", "")
+                tags_html = ''
+                for i, kw in enumerate(keywords[:kw_limit]):
+                    kw_text = html.escape(kw.get("keyword", ""))
                     escaped_kw = html.escape(kw_text, quote=True)
-                    chips_html += f'<button class="hot-kw-chip cmd-btn" onclick="runCmd(\'{escaped_kw}\')">{html.escape(kw_text)}</button>'
-                hot_kw_html += f'''<div class="hot-kw-row">
-                            <span class="hot-kw-label">{icon} {html.escape(cat_name)}</span>
-                            <div class="hot-kw-chips">{chips_html}</div>
-                        </div>'''
+                    sep = ' <span class="hot-kw-sep">|</span> ' if i > 0 else ''
+                    tags_html += f'{sep}<a class="hot-kw-tag" href="#" onclick="runCmd(\'{escaped_kw}\')">{kw_text}</a>'
+                hot_kw_html += f'<div class="hot-kw-row"><span class="hot-kw-label">{icon} {html.escape(cat_name)}</span>{tags_html}</div>'
         hot_kw_html += '</div>'
     else:
         default_keywords = ["比特币", "以太坊", "AI", "空投", "Python", "FastAPI"]
-        chips_html = ''.join(
-            f'<button class="hot-kw-chip cmd-btn" onclick="runCmd(\'{html.escape(kw, quote=True)}\')">🔍 {html.escape(kw)}</button>'
-            for kw in default_keywords
-        )
-        hot_kw_html = f'''<div class="hot-kw-section mt-2">
-                    <div class="text-[11px] text-sky-300 mb-2 font-semibold">🚀 热门搜索</div>
-                    <div class="hot-kw-row">
-                        <span class="hot-kw-label">🚀 默认热门</span>
-                        <div class="hot-kw-chips">{chips_html}</div>
-                    </div></div>'''
+        tags_html = ''
+        for i, kw in enumerate(default_keywords):
+            escaped_kw = html.escape(kw, quote=True)
+            sep = ' <span class="hot-kw-sep">|</span> ' if i > 0 else ''
+            tags_html += f'{sep}<a class="hot-kw-tag" href="#" onclick="runCmd(\'{escaped_kw}\')">{html.escape(kw)}</a>'
+        hot_kw_html = f'<div class="hot-kw-section mt-2"><div class="text-xs text-sky-300 mb-1 font-semibold">🚀 热门搜索</div><div class="hot-kw-row"><span class="hot-kw-label">🚀 默认热门</span>{tags_html}</div></div>'
 
     reply_html = f"""
                 👋 <b>欢迎使用 TG搜索Pro Bot</b><br>
