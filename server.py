@@ -4736,12 +4736,30 @@ body{background:#0f172a;color:#e2e8f0;font-family:-apple-system,BlinkMacSystemFo
 .charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;margin-bottom:20px}
 .chart-box{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:16px}
 .chart-box h3{font-size:13px;color:#94a3b8;margin-bottom:12px;font-weight:500}
-.system{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:16px}
+.system{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:16px;margin-bottom:20px}
 .system h3{font-size:13px;color:#94a3b8;margin-bottom:12px;font-weight:500}
 .sys-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px}
 .sys-item{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #1e293b;font-size:13px}
 .sys-item .k{color:#94a3b8}
 .sys-item .v{color:#e2e8f0;font-weight:500}
+.sys-item .v.err{color:#fb7185}
+.sys-item .v.warn{color:#fbbf24}
+.sys-item .v.ok{color:#34d399}
+.sev-box{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:16px;margin-bottom:20px}
+.sev-box h3{font-size:13px;color:#94a3b8;margin-bottom:12px;font-weight:500}
+.issue-list{list-style:none;padding:0}
+.issue-list li{padding:4px 0;font-size:13px;border-bottom:1px solid #0f172a;display:flex;align-items:center;gap:6px}
+.issue-list li.critical{color:#fb7185}
+.issue-list li.warning{color:#fbbf24}
+.issue-list li.healthy{color:#34d399}
+.log-section{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:16px;margin-bottom:20px}
+.log-section h3{font-size:13px;color:#94a3b8;margin-bottom:12px;font-weight:500}
+.log-block{margin-bottom:16px}
+.log-block:last-child{margin-bottom:0}
+.log-block h4{font-size:12px;color:#64748b;margin-bottom:6px;font-weight:500}
+.log-lines{background:#0f172a;border-radius:6px;padding:8px 10px;font-family:'Fira Code',Consolas,monospace;font-size:11px;line-height:1.6;max-height:180px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;color:#94a3b8}
+.log-lines .err-line{color:#fb7185}
+.log-lines .warn-line{color:#fbbf24}
 .loading{text-align:center;padding:60px 20px;color:#64748b}
 .loading .spinner{width:36px;height:36px;border:3px solid #334155;border-top-color:#38bdf8;border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 16px}
 @keyframes spin{to{transform:rotate(360deg)}}
@@ -4751,6 +4769,9 @@ body{background:#0f172a;color:#e2e8f0;font-family:-apple-system,BlinkMacSystemFo
 .error-box p{color:#94a3b8;font-size:14px}
 .countdown{font-size:12px;color:#64748b}
 .footer{text-align:center;padding:16px;font-size:11px;color:#475569}
+.tab-bar{display:flex;gap:4px;margin-bottom:16px}
+.tab-btn{padding:6px 16px;border-radius:8px;border:1px solid #334155;background:#1e293b;color:#94a3b8;font-size:12px;cursor:pointer;transition:all .15s}
+.tab-btn.active{background:#334155;color:#f1f5f9;border-color:#475569}
 @media(max-width:600px){.cards{grid-template-columns:repeat(2,1fr)}.charts{grid-template-columns:1fr}}
 </style>
 </head>
@@ -4766,7 +4787,8 @@ body{background:#0f172a;color:#e2e8f0;font-family:-apple-system,BlinkMacSystemFo
 <script>
 const SHARE_ID = window.location.pathname.split('/').pop();
 let expireAt = null;
-let refreshTimer = null;
+let dashboardData = null;
+let diagnosticData = null;
 
 async function fetchData(){
   try{
@@ -4783,16 +4805,28 @@ async function fetchData(){
     if(!json.ok){showExpired(json.error||'未知错误');return;}
     expireAt = json.expires_at;
     updateBadge(json.expires_at);
-    render(json.data);
+    dashboardData = json.data;
+    renderAll();
   }catch(e){showExpired('网络错误: '+e.message);}
+}
+
+async function fetchDiagnostic(){
+  try{
+    const r = await fetch('/api/diagnostic');
+    if(!r.ok) return;
+    const json = await r.json();
+    if(json.ok !== false) diagnosticData = json;
+    renderAll();
+  }catch(e){}
 }
 
 function updateBadge(expStr){
   const el = document.getElementById('expireBadge');
   if(!expStr){el.textContent='';return;}
-  const exp = new Date(expStr.replace(' ','T')).getTime();
-  const now = Date.now();
-  const remain = Math.max(0,Math.floor((exp-now)/60000));
+  const s = String(expStr).replace(' ','T');
+  const exp = new Date(s).getTime();
+  if(isNaN(exp)){el.textContent='';return;}
+  const remain = Math.max(0,Math.floor((exp-Date.now())/60000));
   el.textContent = '⏱ 剩余 '+remain+' 分钟';
   if(remain<5) el.className='badge expired';
 }
@@ -4802,37 +4836,73 @@ function showExpired(msg){
     '<div class="error-box"><div class="icon">⚠️</div><h2>'+msg+'</h2><p>请联系管理员重新生成分享链接</p></div>';
 }
 
-function render(D){
+function fmt(n){return Number(n||0).toLocaleString('zh-CN');}
+function pctColor(v){return v==null?'':v>80?'err':v>50?'warn':'ok';}
+function sevClass(i){return i.level==='critical'?'critical':i.level==='warning'?'warning':'healthy';}
+function sevIcon(i){return i.level==='critical'?'🔴':i.level==='warning'?'🟡':'✅';}
+
+function buildSysGrid(D, diag){
   const s = D.system||{};
-  const app = document.getElementById('app');
-  app.innerHTML = `
-    <div class="cards">
-      <div class="card green"><div class="label">👥 总用户</div><div class="value">${fmt(D.total_users)}</div><div class="sub">今日 +${D.users_today}</div></div>
-      <div class="card blue"><div class="label">💰 总充值</div><div class="value">${(+D.total_recharge).toFixed(2)} U</div><div class="sub">共 ${D.recharge_count} 笔</div></div>
-      <div class="card amber"><div class="label">📊 总搜索</div><div class="value">${fmt(D.total_messages)}</div><div class="sub">${D.total_channels} 个频道</div></div>
-      <div class="card"><div class="label">💵 广告消耗</div><div class="value">${(+D.total_ad_cost).toFixed(4)}</div><div class="sub">${D.impressions} 曝光 / ${D.clicks} 点击</div></div>
-      <div class="card green"><div class="label">🤖 机器人</div><div class="value" style="font-size:14px">${s.bot_status||'-'}</div></div>
-      <div class="card blue"><div class="label">🕷 采集器</div><div class="value" style="font-size:14px">${s.crawler_status||'-'}</div></div>
-      <div class="card amber"><div class="label">💿 数据库</div><div class="value">${s.db_size_mb||0} MB</div><div class="sub">${s.backup_count||0} 备份</div></div>
-      <div class="card"><div class="label">⌛ 运行时长</div><div class="value" style="font-size:14px">${s.uptime||'-'}</div></div>
-    </div>
-    <div class="charts">
-      <div class="chart-box"><h3>📈 近7天趋势</h3><canvas id="c1"></canvas></div>
-      <div class="chart-box"><h3>👤 新增用户 / 搜索次数</h3><canvas id="c2"></canvas></div>
-    </div>
-    <div class="system">
-      <h3>🖥 系统信息</h3>
-      <div class="sys-grid">
-        <div class="sys-item"><span class="k">版本</span><span class="v">${s.version||'-'}</span></div>
-        <div class="sys-item"><span class="k">Python</span><span class="v">${s.python_version||'-'}</span></div>
-        <div class="sys-item"><span class="k">采集账号</span><span class="v">${s.account_pool_size??'-'} 个</span></div>
-        <div class="sys-item"><span class="k">充值扫描</span><span class="v">${s.recharge_scanner||'-'}</span></div>
-        <div class="sys-item"><span class="k">日志文件</span><span class="v">${s.log_count||0} 个 (${s.log_size_mb||0} MB)</span></div>
-        <div class="sys-item"><span class="k">数据库路径</span><span class="v">${(s.db_path||'').split('/').pop()||'-'}</span></div>
-      </div>
-    </div>`;
-  renderCharts(D);
+  const sys = (diag&&diag.system)||{};
+  const svcs = (diag&&diag.services)||{};
+  let html = '';
+  const rows = [
+    ['版本', s.version||'-'],
+    ['Python', s.python_version||sys.python||'-'],
+    ['操作系统', sys.os||'-'],
+    ['主机名', sys.hostname||'-'],
+    ['CPU 使用率', sys.cpu_percent!=null?sys.cpu_percent+'%':'-'],
+    ['内存使用', sys.memory_used_percent!=null?sys.memory_used_percent+'% / '+sys.memory_total_gb+'GB':'-'],
+    ['磁盘使用', sys.disk_used_percent!=null?sys.disk_used_percent+'%':'-'],
+    ['Bot 状态', (svcs['tg-search-bot']||{}).status||'-'],
+    ['Admin 状态', (svcs['tg-search-admin']||{}).status||'-'],
+    ['Nginx 状态', (svcs['nginx']||{}).status||'-'],
+    ['采集账号', s.account_pool_size!=null?s.account_pool_size+' 个':'-'],
+    ['充值扫描', s.recharge_scanner||'-'],
+    ['日志文件', (s.log_count||0)+' 个 ('+((s.log_size_mb)||0)+' MB)'],
+    ['数据库', ((s.db_path||'').split('/').pop()||'db.sqlite3')+' ('+(s.db_size_mb||0)+' MB)'],
+    ['备份数量', (s.backup_count||0)+' 个'],
+    ['运行时长', s.uptime||'-'],
+  ];
+  for(const [k,v] of rows){
+    const cls = (k==='CPU 使用率'||k==='内存使用'||k==='磁盘使用') ? ' '+pctColor(
+      k==='CPU 使用率'?sys.cpu_percent:k==='内存使用'?sys.memory_used_percent:sys.disk_used_percent
+    ):'';
+    html += '<div class="sys-item"><span class="k">'+k+'</span><span class="v'+cls+'">'+v+'</span></div>';
+  }
+  return html;
 }
+
+function buildIssues(diag){
+  if(!diag) return '';
+  const issues = diag.summary&&diag.summary.issues||[];
+  if(issues.length===0) return '<ul class="issue-list"><li class="healthy">✅ 所有系统状态正常</li></ul>';
+  return '<ul class="issue-list">'+issues.map(i=>{
+    const lvl = i.includes('未运行')||i.includes('错误')?'critical':'warning';
+    return '<li class="'+sevClass({level:lvl})+'">'+sevIcon({level:lvl})+' '+i+'</li>';
+  }).join('')+'</ul>';
+}
+
+function buildLogs(diag){
+  if(!diag||!diag.logs) return '';
+  const logKeys = ['admin_stderr','bot_stderr','admin_stdout','bot_stdout'];
+  let html = '';
+  for(const key of logKeys){
+    const log = diag.logs[key];
+    if(!log||!log.exists||!log.tail) continue;
+    const lines = log.tail.split('\n').filter(Boolean);
+    if(lines.length===0) continue;
+    const colored = lines.map(l=>{
+      if(/error|exception|failed|traceback/i.test(l)) return '<span class="err-line">'+esc(l)+'</span>';
+      if(/warn/i.test(l)) return '<span class="warn-line">'+esc(l)+'</span>';
+      return esc(l);
+    }).join('\n');
+    html += '<div class="log-block"><h4>'+key+' ('+lines.length+' 行)</h4><div class="log-lines">'+colored+'</div></div>';
+  }
+  return html;
+}
+
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 
 function renderCharts(D){
   const labels = D.last7_dates||[];
@@ -4843,20 +4913,56 @@ function renderCharts(D){
       {label:'充值(USDT)',data:D.last7_recharge||[],backgroundColor:'#10b981',borderRadius:4},
       {label:'广告消耗',data:D.last7_ad_cost||[],backgroundColor:'#f59e0b',borderRadius:4}
     ]},options:opts});
-  }catch(e){console.error('c1 error',e);}
+  }catch(e){}
   try{
     if(window._c2)window._c2.destroy();
     window._c2 = new Chart(document.getElementById('c2'),{type:'line',data:{labels,datasets:[
       {label:'新增用户',data:D.last7_new_users||[],borderColor:'#818cf8',backgroundColor:'rgba(129,140,248,.15)',tension:.3,fill:true,pointRadius:3},
       {label:'搜索次数',data:D.last7_searches||[],borderColor:'#34d399',backgroundColor:'rgba(52,211,153,.15)',tension:.3,fill:true,pointRadius:3}
     ]},options:opts});
-  }catch(e){console.error('c2 error',e);}
+  }catch(e){}
 }
 
-function fmt(n){return Number(n||0).toLocaleString('zh-CN');}
+function renderAll(){
+  if(!dashboardData) return;
+  const D = dashboardData;
+  const diag = diagnosticData;
+  const app = document.getElementById('app');
+  const sysGrid = buildSysGrid(D, diag);
+  const issues = buildIssues(diag);
+  const logHtml = buildLogs(diag);
+  app.innerHTML = `
+    <div class="cards">
+      <div class="card green"><div class="label">👥 总用户</div><div class="value">${fmt(D.total_users)}</div><div class="sub">今日 +${D.users_today}</div></div>
+      <div class="card blue"><div class="label">💰 总充值</div><div class="value">${(+D.total_recharge).toFixed(2)} U</div><div class="sub">共 ${D.recharge_count} 笔</div></div>
+      <div class="card amber"><div class="label">📊 总搜索</div><div class="value">${fmt(D.total_messages)}</div><div class="sub">${D.total_channels} 个频道</div></div>
+      <div class="card"><div class="label">💵 广告消耗</div><div class="value">${(+D.total_ad_cost).toFixed(4)}</div><div class="sub">${D.impressions} 曝光 / ${D.clicks} 点击</div></div>
+      <div class="card green"><div class="label">🤖 机器人</div><div class="value" style="font-size:14px">${(diag&&diag.services&&diag.services['tg-search-bot']&&diag.services['tg-search-bot'].status)||D.system&&D.system.bot_status||'-'}</div></div>
+      <div class="card blue"><div class="label">🕷 采集器</div><div class="value" style="font-size:14px">${D.system&&D.system.crawler_status||'-'}</div></div>
+      <div class="card amber"><div class="label">💿 数据库</div><div class="value">${D.system&&D.system.db_size_mb||0} MB</div><div class="sub">${D.system&&D.system.backup_count||0} 备份</div></div>
+      <div class="card"><div class="label">⌛ 运行时长</div><div class="value" style="font-size:14px">${D.system&&D.system.uptime||'-'}</div></div>
+    </div>
+    <div class="charts">
+      <div class="chart-box"><h3>📈 近7天趋势</h3><canvas id="c1"></canvas></div>
+      <div class="chart-box"><h3>👤 新增用户 / 搜索次数</h3><canvas id="c2"></canvas></div>
+    </div>
+    <div class="system">
+      <h3>🖥 服务器参数与系统信息</h3>
+      <div class="sys-grid">${sysGrid}</div>
+    </div>
+    <div class="sev-box">
+      <h3>🚨 系统诊断状态</h3>
+      ${issues}
+    </div>
+    ${logHtml ? '<div class="log-section"><h3>📋 最近错误日志</h3>'+logHtml+'</div>' : ''}
+  `;
+  renderCharts(D);
+}
 
 fetchData();
+fetchDiagnostic();
 setInterval(fetchData,30000);
+setInterval(fetchDiagnostic,60000);
 </script>
 </body>
 </html>"""

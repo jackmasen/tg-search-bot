@@ -2079,15 +2079,21 @@ async function generateMonitorShare() {
   }
 }
 
-function copyOpsShareUrl() {
+function copyOpsShareUrl(btn) {
   const input = document.getElementById('ops-share-url');
   input.select();
-  navigator.clipboard.writeText(input.value).then(() => {
-    const btn = event.target;
-    const orig = btn.textContent;
-    btn.textContent = '✅ 已复制';
-    setTimeout(() => btn.textContent = orig, 1500);
-  });
+  const copySuccess = document.execCommand('copy');
+  if (copySuccess) {
+    const orig = btn ? btn.textContent : '📋 复制';
+    if (btn) { btn.textContent = '✅ 已复制'; setTimeout(() => btn.textContent = orig, 1500); }
+  }
+  // 兼容 HTTPS 外域场景：fallback 提示
+  if (!copySuccess && navigator.clipboard) {
+    navigator.clipboard.writeText(input.value).then(() => {
+      const orig = btn ? btn.textContent : '📋 复制';
+      if (btn) { btn.textContent = '✅ 已复制'; setTimeout(() => btn.textContent = orig, 1500); }
+    });
+  }
 }
 
 // ---------- 工具函数 ----------
