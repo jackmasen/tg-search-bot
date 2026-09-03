@@ -184,26 +184,26 @@ class AdManager:
             return [dict(row) for row in rows]
 
     async def get_hot_keywords_by_category(self) -> dict:
-        """按分类获取所有热门关键词"""
+        """按分类获取所有热门关键词（与前端管理页面数据一致，不过滤is_active）"""
         async with get_db() as db:
-            # 获取所有启用的分类
+            # 获取所有分类（不过滤is_active，与前端一致）
             cat_cursor = await db.execute(
-                "SELECT * FROM hot_keyword_categories WHERE is_active=1 ORDER BY sort_order ASC"
+                "SELECT * FROM hot_keyword_categories ORDER BY sort_order ASC"
             )
             categories = [dict(row) for row in await cat_cursor.fetchall()]
-            
+
             result = {}
             for cat in categories:
                 kw_cursor = await db.execute(
                     """SELECT * FROM hot_keywords
-                       WHERE is_active=1 AND category=?
+                       WHERE category=?
                        ORDER BY display_order ASC, id ASC""",
                     (cat["name"],)
                 )
                 keywords = [dict(row) for row in await kw_cursor.fetchall()]
                 if keywords:
                     result[cat["name"]] = {
-                        "icon": cat["icon"],
+                        "icon": cat.get("icon") or "🔍",
                         "keywords": keywords
                     }
             return result

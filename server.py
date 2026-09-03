@@ -5357,6 +5357,8 @@ async def api_bot_command(request: Request):
             actions = [
                 {"text": "📊 /stats 数据统计", "cmd": "/stats"},
                 {"text": "💰 /wallet 钱包", "cmd": "/wallet"},
+                {"text": "📺 /channels 频道管理", "cmd": "/channels"},
+                {"text": "📣 /ads 广告管理", "cmd": "/ads"},
                 {"text": "📣 /advertise 广告合作", "cmd": "/advertise"},
             ]
         elif cmd == "/help":
@@ -5367,6 +5369,8 @@ async def api_bot_command(request: Request):
 💵 /recharge [金额] - 充值USDT<br>
 ✅ /checkrecharge - 手动刷新充值状态<br>
 📣 /advertise - 广告合作入口<br>
+📺 /channels - 频道管理列表（含统计数据）<br>
+📣 /ads - 广告管理列表（含投放数据）<br>
 🌿 /createad - 创建广告计划<br>
 📋 /myads - 我的广告<br>
 🎨 /adtemplates - 广告模板<br>
@@ -5669,6 +5673,131 @@ async def api_bot_command(request: Request):
             stats = await ad_manager.get_advertiser_stats(tg_user_id)
             reply_html = f"""📈 <b>广告数据统计</b>
 <pre class="bg-black/40 p-2 rounded text-xs mt-1">{stats}</pre>"""
+        elif cmd == "/channels":
+            try:
+                async with get_db() as db:
+                    cur = await db.execute("SELECT COUNT(*) c FROM channels")
+                    total_channels = (await cur.fetchone())["c"]
+                    cur = await db.execute("SELECT COUNT(*) c FROM channels WHERE is_featured=1")
+                    featured_count = (await cur.fetchone())["c"]
+                    cur = await db.execute("SELECT COALESCE(SUM(member_count),0) s FROM channels")
+                    total_members = (await cur.fetchone())["s"]
+                    cur = await db.execute("SELECT COUNT(*) c FROM messages")
+                    total_messages = (await cur.fetchone())["c"]
+                    cur = await db.execute("SELECT id, title, username, member_count, is_featured, sort_order, category, description, target_url FROM channels ORDER BY sort_order ASC, id DESC LIMIT 50")
+                    rows = [dict(r) for r in await cur.fetchall()]
+                ch_html = ""
+                for idx, ch in enumerate(rows, 1):
+                    title = html.escape(ch.get("title") or ch.get("username") or "频道")
+                    username = ch.get("username") or ""
+                    if username and not username.startswith("@"):
+                        username = "@" + username
+                    cat = html.escape(ch.get("category") or "")
+                    members = ch.get("member_count") or 0
+                    is_feat = ch.get("is_featured")
+                    url = html.escape(ch.get("target_url") or "#")
+                    rank_color = 'text-yellow-300' if idx == 1 else ('text-gray-300' if idx == 2 else ('text-amber-600' if idx == 3 else 'text-slate-400'))
+                    feat_badge = ' ⭐' if is_feat else ''
+                    cat_tag = f'<span class="bg-sky-800/50 text-sky-200 px-1 rounded text-[10px]">{cat}</span>' if cat else ''
+                    member_tag = f'<span class="bg-emerald-800/50 text-emerald-200 px-1 rounded text-[10px]">👥{members}</span>' if members else ''
+                    join_btn = f'<a href="{url}" target="_blank" class="text-emerald-400 text-[10px]">👉加入</a>' if url and url != "#" else ''
+                    ch_html += f'''
+                    <div class="flex items-center gap-2 py-2 px-3 bg-slate-800/40 rounded-lg mb-1">
+                      <span class="text-xs font-bold {rank_color} w-5 text-center">{idx}</span>
+                      <div class="flex-1 min-w-0">
+                        <div class="text-xs font-semibold text-sky-200 truncate">{title}{feat_badge}</div>
+                        <div class="flex flex-wrap gap-1 mt-0.5">{cat_tag}{member_tag}</div>
+                      </div>
+                      <div class="text-[10px] text-gray-400 whitespace-nowrap">{username or '-'}</div>
+                      {join_btn}
+                    </div>'''
+                reply_html = f"""📺 <b>频道管理 · 推广</b><br>
+<div class="grid grid-cols-2 gap-2 mb-3">
+  <div class="bg-sky-900/40 rounded-lg p-2 text-center"><div class="text-xs text-slate-400">📦 频道总数</div><div class="text-lg font-bold text-sky-300">{total_channels}</div></div>
+  <div class="bg-amber-900/40 rounded-lg p-2 text-center"><div class="text-xs text-slate-400">⭐ 已推荐置顶</div><div class="text-lg font-bold text-amber-300">{featured_count}</div></div>
+  <div class="bg-emerald-900/40 rounded-lg p-2 text-center"><div class="text-xs text-slate-400">👥 总成员数</div><div class="text-lg font-bold text-emerald-300">{total_members:,}</div></div>
+  <div class="bg-violet-900/40 rounded-lg p-2 text-center"><div class="text-xs text-slate-400">📨 总消息索引</div><div class="text-lg font-bold text-violet-300">{total_messages:,}</div></div>
+</div>
+<div class="text-xs text-gray-400 mb-2">📋 频道列表（前30）：</div>
+{ch_html or '<div class="text-gray-500 text-xs">暂无频道数据</div>'}
+<div class="text-[10px] text-gray-500 mt-2">共 {total_channels} 个频道，点击「加入」直达频道</div>"""
+                actions = [
+                    {"text": "🔍 搜索频道", "cmd": "/start"},
+                    {"text": "📣 广告管理 /ads", "cmd": "/ads"},
+                ]
+            except Exception as e:
+                reply_html = f"⚠️ 频道数据加载失败：{e}"
+                actions = []
+        elif cmd == "/ads":
+            try:
+                async with get_db() as db:
+                    cur = await db.execute("SELECT COUNT(*) c FROM ad_campaigns")
+                    total_camps = (await cur.fetchone())["c"]
+                    cur = await db.execute("SELECT COALESCE(SUM(daily_spent),0) s FROM ad_campaigns")
+                    total_spent = float((await cur.fetchone())["s"] or 0)
+                    cur = await db.execute("SELECT COUNT(*) c FROM ad_impressions")
+                    total_imps = (await cur.fetchone())["c"]
+                    cur = await db.execute("SELECT COUNT(*) c FROM ad_impressions WHERE is_click=1")
+                    total_clicks = (await cur.fetchone())["c"]
+                    ctr = (total_clicks / total_imps * 100) if total_imps > 0 else 0
+                    cur = await db.execute("""
+                        SELECT ac.*, u.username as advertiser_username FROM ad_campaigns ac
+                        LEFT JOIN advertisers adv ON adv.id = ac.advertiser_id
+                        LEFT JOIN users u ON u.id = adv.user_id
+                        ORDER BY ac.display_order ASC, ac.id DESC LIMIT 20
+                    """)
+                    rows = [dict(r) for r in await cur.fetchall()]
+                ad_html = ""
+                for idx, c in enumerate(rows, 1):
+                    camp_id = c.get("id", "")
+                    keyword = html.escape(c.get("keyword") or "")
+                    title = html.escape(c.get("title") or "")
+                    cat = html.escape(c.get("category") or "")
+                    status = c.get("status", "unknown")
+                    daily_budget = float(c.get("daily_budget") or 0)
+                    daily_spent = float(c.get("daily_spent") or 0)
+                    budget_ratio = min(1.0, daily_spent / daily_budget) if daily_budget > 0 else 0
+                    progress_color = 'bg-emerald-500' if budget_ratio < 0.5 else ('bg-yellow-500' if budget_ratio < 0.8 else 'bg-rose-500')
+                    if status == "active":
+                        status_badge = '<span class="text-emerald-400 text-[10px]">🟢 投放中</span>'
+                    elif status == "paused":
+                        status_badge = '<span class="text-rose-400 text-[10px]">⏸ 已暂停</span>'
+                    else:
+                        status_badge = f'<span class="text-gray-400 text-[10px]">{status}</span>'
+                    cat_tag = f'<span class="bg-sky-800/50 text-sky-200 px-1 rounded text-[10px]">{cat}</span>' if cat else ''
+                    advertiser = html.escape(c.get("advertiser_username") or f"ID:{camp_id}")
+                    ad_html += f'''
+                    <div class="py-2 px-3 bg-slate-800/40 rounded-lg mb-1">
+                      <div class="flex justify-between items-start">
+                        <div class="text-xs font-semibold text-sky-200 truncate flex-1 mr-2">
+                          <span class="text-gray-500 mr-1">#{camp_id}</span>{keyword or '-'} {cat_tag}
+                        </div>
+                        <div class="text-[10px] whitespace-nowrap">{status_badge}</div>
+                      </div>
+                      <div class="text-[11px] text-gray-300 mt-0.5 truncate">{title or '-'}</div>
+                      <div class="text-[10px] text-gray-500 mt-0.5">广告主: {advertiser} · 日预算 ${daily_budget:.2f} / 已耗 ${daily_spent:.2f}</div>
+                      <div class="mt-1 w-full h-1 bg-slate-700 rounded-full overflow-hidden">
+                        <div class="h-full {progress_color}" style="width:{int(budget_ratio*100)}%"></div>
+                      </div>
+                    </div>'''
+                reply_html = f"""📣 <b>广告管理 · 投放数据</b><br>
+<div class="grid grid-cols-2 gap-2 mb-3">
+  <div class="bg-sky-900/40 rounded-lg p-2 text-center"><div class="text-xs text-slate-400">🎯 广告计划</div><div class="text-lg font-bold text-sky-300">{total_camps}</div></div>
+  <div class="bg-amber-900/40 rounded-lg p-2 text-center"><div class="text-xs text-slate-400">💰 累计消耗</div><div class="text-lg font-bold text-amber-300">${total_spent:.2f}</div></div>
+  <div class="bg-emerald-900/40 rounded-lg p-2 text-center"><div class="text-xs text-slate-400">👁 累计曝光</div><div class="text-lg font-bold text-emerald-300">{total_imps:,}</div></div>
+  <div class="bg-violet-900/40 rounded-lg p-2 text-center"><div class="text-xs text-slate-400">🖱 平均CTR</div><div class="text-lg font-bold text-violet-300">{ctr:.1f}%</div></div>
+</div>
+<div class="text-xs text-gray-400 mb-2">📋 广告列表（前20）：</div>
+{ad_html or '<div class="text-gray-500 text-xs">暂无广告数据</div>'}
+<div class="text-[10px] text-gray-500 mt-2">共 {total_camps} 条广告计划</div>"""
+                actions = [
+                    {"text": "📺 频道管理 /channels", "cmd": "/channels"},
+                    {"text": "🔥 热门关键词", "cmd": "/start"},
+                    {"text": "🌿 创建广告 /createad", "cmd": "/createad"},
+                ]
+            except Exception as e:
+                reply_html = f"⚠️ 广告数据加载失败：{e}"
+                actions = []
         elif cmd == "/add":
             reply_html = f"➕ 已申请添加频道：{arg or '未指定频道链接，示例 /add https://t.me/bitcoin' }<br>采集账号池将在约{Config.JOIN_INTERVAL_SECONDS}秒后自动执行join。<br>（演示环境：不真实joinTG，只做界面演示）"
         else:
