@@ -1157,7 +1157,7 @@ async def bot_page():
             default_user = rows[0]
             user_options_html = "".join(
                 f'<option value="{r["tg_user_id"]}" {"selected" if r==default_user else ""}>'
-                f'{r.get("role") or "普通会员"} (@{r["username"]})</option>'
+                f'{r.get("role") or "普通会员"} (@{r["username"] or r["tg_user_id"]})</option>'
                 for r in rows
             )
             default_tg_user_id = str(default_user["tg_user_id"])
