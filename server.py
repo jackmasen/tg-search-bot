@@ -442,12 +442,24 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans
 .cmd-btn {{ transition: all 0.15s; }}
 .switch-user select {{ background:#0e1621; color:#fff; border:1px solid #2b5278; }}
 .ad-card {{ background: linear-gradient(90deg,#1e3a5f 0%, #2b5278 100%); }}
-.ad-row {{ display:flex; align-items:center; gap:8px; padding:6px 10px; border-radius:8px; margin-bottom:4px; background:linear-gradient(90deg,#1e3a5f 0%, #2b5278 100%); border:1px solid rgba(255,255,255,0.08); font-size:13px; line-height:1.4; }}
-.ad-rank {{ color:#7dd3fc; font-weight:bold; min-width:18px; text-align:center; }}
-.ad-title {{ color:#fff; font-weight:600; cursor:pointer; text-decoration:none; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }}
+/* 广告行：垂直结构，一行一个广告，从左到右逐行显示 */
+.ad-row {{ display:flex; flex-direction:column; gap:4px; padding:8px 12px; border-radius:10px; margin-bottom:6px; background:linear-gradient(90deg,#1e3a5f 0%, #2b5278 100%); border:1px solid rgba(255,255,255,0.08); font-size:13px; line-height:1.5; }}
+.ad-row-top {{ display:flex; align-items:flex-start; gap:8px; width:100%; }}
+.ad-rank {{ color:#7dd3fc; font-weight:bold; min-width:22px; text-align:center; flex-shrink:0; font-size:12px; padding-top:1px; }}
+.ad-title {{ color:#fff; font-weight:600; cursor:pointer; text-decoration:none; word-break:break-all; line-height:1.35; flex:1; }}
 .ad-title:hover {{ text-decoration:underline; }}
+.ad-desc {{ color:#cbd5e1; font-size:11px; line-height:1.45; opacity:0.92; padding-left:30px; word-break:break-all; }}
+.ad-tags {{ display:flex; flex-wrap:wrap; gap:4px; padding-left:30px; }}
 .ad-tag {{ font-size:11px; padding:1px 6px; border-radius:10px; white-space:nowrap; }}
-.ad-action {{ font-size:11px; padding:2px 8px; border-radius:6px; white-space:nowrap; cursor:pointer; }}
+.ad-actions {{ display:flex; flex-wrap:wrap; gap:4px; padding-left:30px; }}
+.ad-action {{ font-size:11px; padding:2px 10px; border-radius:6px; white-space:nowrap; cursor:pointer; }}
+/* 热门搜索：一行一个分类，分类标签左对齐，关键词一行从左到右排列 */
+.hot-kw-section {{ margin-top:6px; }}
+.hot-kw-row {{ display:flex; align-items:center; gap:6px; margin-bottom:5px; padding:2px 0; }}
+.hot-kw-label {{ font-size:11px; color:#94a3b8; min-width:92px; flex-shrink:0; }}
+.hot-kw-chips {{ display:flex; flex-wrap:wrap; gap:4px; flex:1; }}
+.hot-kw-chip {{ font-size:11px; background:#334155; color:#e2e8f0; padding:2px 8px; border-radius:999px; white-space:nowrap; border:1px solid #475569; cursor:pointer; }}
+.hot-kw-chip:hover {{ background:#475569; border-color:#64748b; }}
 </style>
 </head>
 <body class="min-h-screen">
@@ -531,8 +543,15 @@ function addMessage(html, who='bot') {{
       ${{html}}
     </div>`;
   chatEl.appendChild(wrap);
+  // 绑定 bubble 内部的 inline onclick 按钮（innerHTML 方式插入的按钮需要重新绑定）
+  wrap.querySelectorAll('[data-cmd]').forEach(el => {{
+    el.addEventListener('click', () => {{ try {{ runCmd(el.getAttribute('data-cmd')); }} catch(e) {{ addMessage('❌ 操作失败：' + e.message); }} }});
+  }});
   window.scrollTo({{top: document.body.scrollHeight, behavior:'smooth'}});
 }}
+
+// sendCmd 别名（AI扩展关键词、旧按钮可能使用），统一调用 runCmd
+function sendCmd(cmd) {{ return runCmd(cmd); }}
 
 function cmdButtonMarkup(text, cmd) {{
   return `<button class="cmd-btn inline-block text-xs bg-sky-600/80 hover:bg-sky-500 text-white px-2 py-1 rounded mr-2 mb-1" onclick="runCmd('${{cmd}}')">${{text}}</button>`;
@@ -722,41 +741,62 @@ function renderBotResponse(data) {{
   // data = {{ reply_html, actions:[{{text,cmd}}], search_results:[...], ad_result:{{...}}, priority_ads:[...], priority_channels:[...] }}
   let html = data.reply_html || '';
 
-  // 优先展示广告（头部置顶）
+  // 优先展示广告（头部置顶）一行一个：标题+描述+标签+操作，从左到右整齐排列
   if (data.priority_ads && data.priority_ads.length) {{
-    html += `<div class="mt-3"><div class="text-xs text-amber-400 mb-1.5 font-semibold">📣 广告推广（优先展示）</div>`;
+    html += `<div class="mt-3"><div class="text-xs text-amber-400 mb-2 font-semibold">📣 广告推广（优先展示）</div>`;
     for (const a of data.priority_ads) {{
+      const title = escapeHtml(a.title || '');
+      const desc = escapeHtml(a.description || '');
+      const url = a.target_url || '#';
+      const keyword = escapeHtml(a.keyword || '');
+      const budget = parseFloat(a.remaining_budget || 0).toFixed(2);
+      const cpc = parseFloat(a.cpc_price || 0).toFixed(2);
+      const descHtml = desc ? `<div class="ad-desc">${{desc}}</div>` : '';
+      const tags = [
+        `<span class="ad-tag bg-amber-800/70 text-amber-200">💰 CPC $${{cpc}}/次</span>`,
+        keyword ? `<span class="ad-tag bg-sky-800/60 text-sky-200">🔍 ${{keyword}}</span>` : '',
+        `<span class="ad-tag bg-slate-700/60 text-slate-300">💵 预算 $${{budget}}</span>`,
+      ].filter(Boolean).join('');
+      const tagsHtml = tags ? `<div class="ad-tags">${{tags}}</div>` : '';
+      const actionHtml = (url && url !== '#') ? `<div class="ad-actions"><a href="${{url}}" target="_blank" class="ad-action bg-amber-600 hover:bg-amber-500 text-white">👉 查看详情</a></div>` : '';
       html += `
-        <div class="ad-card p-3 rounded-xl text-white border border-amber-500/30 shadow-lg mb-1.5">
-          <div class="text-[10px] uppercase tracking-wider text-amber-300/80 mb-1">📣 赞助商广告 · CPC ${{a.cpc_price}}/次点击</div>
-          <a href="${{a.target_url || '#'}}" target="_blank" class="block hover:underline">
-            <div class="font-bold mb-0.5">${{a.title}}</div>
-            <div class="text-sm text-white/90">${{a.description}}</div>
-          </a>
-          <div class="mt-2 flex items-center justify-between text-[11px] text-white/70">
-            <span>关键词：${{a.keyword}}</span>
-            <span>💰 剩余预算 $${{a.remaining_budget?.toFixed(2) || '0.00'}}</span>
+        <div class="ad-row mb-1.5" style="background:linear-gradient(90deg,#3f2a1a 0%,#78350f 100%); border-color:rgba(251,191,36,0.18);">
+          <div class="ad-row-top">
+            <span class="ad-rank text-amber-300">📣</span>
+            <a href="${{url}}" target="_blank" class="ad-title">${{title}}</a>
           </div>
+          ${{descHtml}}
+          ${{tagsHtml}}
+          ${{actionHtml}}
         </div>`;
     }}
     html += '</div>';
   }}
 
-  // 优先展示置顶频道
+  // 优先展示置顶频道（一行一个，整齐排列）
   if (data.priority_channels && data.priority_channels.length) {{
-    html += `<div class="mt-2"><div class="text-xs text-sky-300 mb-1.5 font-semibold">⭐ 置顶推广频道</div>`;
+    html += `<div class="mt-2"><div class="text-xs text-sky-300 mb-2 font-semibold">⭐ 置顶推广频道</div>`;
     for (const ch of data.priority_channels) {{
       const title = escapeHtml(ch.title || ch.username || '频道');
       const url = ch.target_url || '#';
       const members = ch.member_count || 0;
       const cat = ch.category || '';
+      const desc = escapeHtml(ch.description || '');
+      const tags = [];
+      if (cat) tags.push(`<span class="ad-tag bg-sky-800/60 text-sky-200">${{escapeHtml(cat)}}</span>`);
+      if (members) tags.push(`<span class="ad-tag bg-slate-700/60 text-slate-300">👥${{members}}</span>`);
+      const tagsHtml = tags.length ? `<div class="ad-tags">${{tags.join('')}}</div>` : '';
+      const descHtml = desc ? `<div class="ad-desc">${{desc}}</div>` : '';
+      const actionHtml = (url && url !== '#') ? `<div class="ad-actions"><a href="${{url}}" target="_blank" class="ad-action bg-emerald-600 hover:bg-emerald-500 text-white text-[11px]">👉 加入</a></div>` : '';
       html += `
         <div class="ad-row mb-1">
-          <span class="ad-rank text-yellow-300">⭐</span>
-          <a href="${{url}}" target="_blank" class="ad-title">${{title}}</a>
-          ${{cat ? `<span class="ad-tag bg-sky-800/60 text-sky-200">${{escapeHtml(cat)}}</span>` : ''}}
-          ${{members ? `<span class="ad-tag bg-slate-700/60 text-slate-300">👥${{members}}</span>` : ''}}
-          ${{url && url !== '#' ? `<a href="${{url}}" target="_blank" class="ad-action bg-emerald-600 hover:bg-emerald-500 text-white text-[10px]">👉 加入</a>` : ''}}
+          <div class="ad-row-top">
+            <span class="ad-rank text-yellow-300">⭐</span>
+            <a href="${{url}}" target="_blank" class="ad-title">${{title}}</a>
+          </div>
+          ${{descHtml}}
+          ${{tagsHtml}}
+          ${{actionHtml}}
         </div>`;
     }}
     html += '</div>';
@@ -770,13 +810,15 @@ function renderBotResponse(data) {{
     </div>`;
   }}
   if (data.ai_expanded_keywords && data.ai_expanded_keywords.length) {{
-    html += `<div class="mt-2">
-      <div class="text-xs text-purple-400 mb-1.5 font-semibold">🔗 AI关联搜索词（点击直达）</div>
-      <div class="flex flex-wrap gap-1.5">`;
-    for (const kw of data.ai_expanded_keywords) {{
-      html += `<button onclick="sendCmd('${{kw}}')" class="px-2.5 py-1 bg-purple-700/50 hover:bg-purple-600 text-purple-200 text-[11px] rounded-full border border-purple-500/40 transition-colors">🔍 ${{escapeHtml(kw)}}</button>`;
-    }}
-    html += '</div></div>';
+    const chips = data.ai_expanded_keywords.map(kw =>
+      `<button data-cmd="${{escapeHtml(kw)}}" class="hot-kw-chip bg-purple-700/50 hover:bg-purple-600 text-purple-200 border-purple-500/40">🔍 ${{escapeHtml(kw)}}</button>`
+    ).join('');
+    html += `<div class="hot-kw-section mt-2">
+      <div class="text-xs text-purple-400 mb-2 font-semibold">🔗 AI关联搜索词（点击直达）</div>
+      <div class="hot-kw-row">
+        <span class="hot-kw-label">🤖 AI扩展</span>
+        <div class="hot-kw-chips">${{chips}}</div>
+      </div></div>`;
   }}
 
   // 搜索结果展示（公网数据：消息 + 频道兜底）
@@ -5659,9 +5701,10 @@ async def api_bot_command(request: Request):
 
             hot_keywords_by_cat = await ad_manager.get_hot_keywords_by_category()
 
+            # 一行一个广告：标题行 + 描述行 + 标签行 + 操作行，从左到右整齐排列
             featured_ads_html = ""
             if featured_ads:
-                featured_ads_html = '<div class="mt-3"><div class="text-xs text-sky-300 mb-1 font-semibold">📣 今日热门推荐（点击标题直达）</div>'
+                featured_ads_html = '<div class="mt-3"><div class="text-xs text-sky-300 mb-2 font-semibold">📣 今日热门推荐（点击标题直达）</div>'
                 for idx, ad in enumerate(featured_ads, 1):
                     title = html.escape(ad.get('title', ''))
                     desc = html.escape(ad.get('description', ''))
@@ -5676,45 +5719,61 @@ async def api_bot_command(request: Request):
                     rank = f'{idx}' if idx <= 3 else str(idx)
                     rank_color = 'text-yellow-300' if idx == 1 else ('text-gray-300' if idx == 2 else ('text-amber-600' if idx == 3 else 'text-slate-400'))
                     featured_badge = ' ⭐' if ad.get('is_featured') else ''
-                    tags = ''
+                    tags_html = ''
+                    tags_parts = []
                     if category:
-                        tags += f'<span class="ad-tag bg-sky-800/60 text-sky-200">{html.escape(category)}</span>'
+                        tags_parts.append(f'<span class="ad-tag bg-sky-800/60 text-sky-200">{html.escape(category)}</span>')
                     if members:
-                        tags += f'<span class="ad-tag bg-slate-700/60 text-slate-300">👥{members}</span>'
+                        tags_parts.append(f'<span class="ad-tag bg-slate-700/60 text-slate-300">👥{members}</span>')
                     if username:
-                        tags += f'<span class="ad-tag bg-indigo-800/60 text-indigo-200">{html.escape(username)}</span>'
-                    action_btn = f'<a href="{url}" target="_blank" class="ad-action bg-emerald-600 hover:bg-emerald-500 text-white">👉 加入</a>' if url and url != '#' else ''
+                        tags_parts.append(f'<span class="ad-tag bg-indigo-800/60 text-indigo-200">{html.escape(username)}</span>')
+                    if tags_parts:
+                        tags_html = f'<div class="ad-tags">{"".join(tags_parts)}</div>'
+                    desc_html = f'<div class="ad-desc">{desc}</div>' if desc else ''
+                    action_btn = f'<div class="ad-actions"><a href="{url}" target="_blank" class="ad-action bg-emerald-600 hover:bg-emerald-500 text-white">👉 加入</a></div>' if url and url != '#' else ''
                     featured_ads_html += f'''
                     <div class="ad-row">
-                        <span class="ad-rank {rank_color}">{rank}</span>
-                        <a href="{url}" target="_blank" class="ad-title" title="{desc}">{title}{featured_badge}</a>
-                        {tags}
+                        <div class="ad-row-top">
+                            <span class="ad-rank {rank_color}">{rank}</span>
+                            <a href="{url}" target="_blank" class="ad-title" title="{desc}">{title}{featured_badge}</a>
+                        </div>
+                        {desc_html}
+                        {tags_html}
                         {action_btn}
                     </div>'''
                 featured_ads_html += '</div>'
 
+            # 热门搜索：每个分类一行，标签左对齐，关键词在后面从左到右排列
             kw_limit = Config.HOT_KEYWORD_PER_CATEGORY_LIMIT
             hot_kw_html = ''
             if hot_keywords_by_cat:
-                hot_kw_html = '<div class="mt-2"><div class="text-[11px] text-sky-300 mb-1 font-semibold">🚀 热门搜索</div>'
+                hot_kw_html = '<div class="hot-kw-section mt-2"><div class="text-[11px] text-sky-300 mb-2 font-semibold">🚀 热门搜索</div>'
                 for cat_name, cat_data in hot_keywords_by_cat.items():
                     icon = cat_data.get("icon", "🔍")
                     keywords = cat_data.get("keywords", [])
                     if keywords:
-                        hot_kw_html += f'<div class="mb-1.5"><span class="text-[10px] text-gray-500 mr-1">{icon} {html.escape(cat_name)}</span>'
+                        chips_html = ''
                         for kw in keywords[:kw_limit]:
                             kw_text = kw.get("keyword", "")
                             escaped_kw = html.escape(kw_text, quote=True)
-                            hot_kw_html += f'<button class="cmd-btn text-[11px] bg-slate-700 hover:bg-slate-600 text-white px-1.5 py-0.5 rounded" onclick="runCmd(\'{escaped_kw}\')">{html.escape(kw_text)}</button>'
-                        hot_kw_html += '</div>'
+                            chips_html += f'<button class="hot-kw-chip cmd-btn" onclick="runCmd(\'{escaped_kw}\')">{html.escape(kw_text)}</button>'
+                        hot_kw_html += f'''<div class="hot-kw-row">
+                            <span class="hot-kw-label">{icon} {html.escape(cat_name)}</span>
+                            <div class="hot-kw-chips">{chips_html}</div>
+                        </div>'''
                 hot_kw_html += '</div>'
             else:
                 default_keywords = ["比特币", "以太坊", "AI", "空投", "Python", "FastAPI"]
-                hot_kw_html = '<div class="mt-2"><div class="text-[11px] text-sky-300 mb-1 font-semibold">🚀 热门搜索</div><div class="flex flex-wrap gap-1">'
-                for kw in default_keywords:
-                    escaped_kw = html.escape(kw, quote=True)
-                    hot_kw_html += f'<button class="cmd-btn text-[11px] bg-slate-700 hover:bg-slate-600 text-white px-1.5 py-0.5 rounded" onclick="runCmd(\'{escaped_kw}\')">🔍 {html.escape(kw)}</button>'
-                hot_kw_html += '</div></div>'
+                chips_html = ''.join(
+                    f'<button class="hot-kw-chip cmd-btn" onclick="runCmd(\'{html.escape(kw, quote=True)}\')">🔍 {html.escape(kw)}</button>'
+                    for kw in default_keywords
+                )
+                hot_kw_html = f'''<div class="hot-kw-section mt-2">
+                    <div class="text-[11px] text-sky-300 mb-2 font-semibold">🚀 热门搜索</div>
+                    <div class="hot-kw-row">
+                        <span class="hot-kw-label">🚀 默认热门</span>
+                        <div class="hot-kw-chips">{chips_html}</div>
+                    </div></div>'''
 
             reply_html = f"""
                 👋 <b>欢迎使用 TG搜索Pro Bot</b><br>
