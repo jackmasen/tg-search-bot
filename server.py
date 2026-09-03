@@ -5752,14 +5752,10 @@ async def _build_start_html(u, balance, featured_ads, hot_keywords_by_cat):
             featured_badge = ' ⭐' if ad.get('is_featured') else ''
             # 描述截断为单行（最多40字符）
             desc_short = desc[:40] + '…' if len(desc) > 40 else desc
-            desc_html = f'<span class="ad-desc">{desc_short}</span>' if desc else ''
-            action_btn = f'<a href="{url}" target="_blank" class="ad-action">👉 加入</a>' if url and url != '#' else ''
-            featured_ads_html += f'''
-                    <div class="ad-row">
-                        <a href="{url}" target="_blank" class="ad-title" title="{desc}">{title}{featured_badge}</a>
-                        {desc_html}
-                        {action_btn}
-                    </div>'''
+            ad_row = f'{title}{featured_badge}  ·  {desc_short}' if desc else title
+            if url and url != '#':
+                actions.append({"text": f"👉 加入", "url": url})
+            featured_ads_html += f'<div class="ad-row">{ad_row}</div>'
         featured_ads_html += '</div>'
 
     kw_limit = Config.HOT_KEYWORD_PER_CATEGORY_LIMIT
@@ -5816,7 +5812,7 @@ async def _build_start_html(u, balance, featured_ads, hot_keywords_by_cat):
         {"text": "📺 /channels 频道管理", "cmd": "/channels"},
         {"text": "📣 /ads 广告管理", "cmd": "/ads"},
         {"text": "📣 /advertise 广告合作", "cmd": "/advertise"},
-    ]
+    ] + actions
     return reply_html, actions
 
 

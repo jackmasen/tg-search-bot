@@ -74,7 +74,10 @@ def _actions_to_keyboard(actions: list) -> InlineKeyboardMarkup:
     for a in actions:
         text = str(a.get("text", ""))
         cmd = str(a.get("cmd", ""))
-        if text and cmd:
+        url = str(a.get("url", ""))
+        if text and url:
+            rows.append([InlineKeyboardButton(text, url=url)])
+        elif text and cmd:
             rows.append([InlineKeyboardButton(text, callback_data=cmd)])
     if not rows:
         return None
