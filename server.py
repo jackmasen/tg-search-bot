@@ -430,7 +430,7 @@ BOT_PAGE_HTML = """
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>TG搜索机器人 · 客户端演示</title>
+<title>TG搜索机器人</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <style>
 body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background:#17212b; }}
@@ -457,12 +457,12 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans
     <div class="flex items-center gap-3">
       <div class="w-10 h-10 rounded-full bg-gradient-to-br from-sky-500 to-indigo-500 flex items-center justify-center text-white font-bold">🔍</div>
       <div>
-        <div class="text-white font-semibold">TG搜索Pro Bot <span class="text-xs text-sky-300 ml-1 px-1.5 py-0.5 rounded bg-sky-900/60">客户端演示</span></div>
+        <div class="text-white font-semibold">TG搜索Pro Bot</div>
         <div class="text-xs text-emerald-400">● 在线 · 索引 $MSG_COUNT_LABEL · $CHANNEL_COUNT 频道</div>
       </div>
     </div>
     <div class="switch-user flex items-center gap-2">
-      <span class="text-xs text-gray-400">演示身份：</span>
+      <span class="text-xs text-gray-400">用户视角：</span>
       <select id="userSelect" onchange="switchUser(this.value)" class="text-sm rounded px-2 py-1 outline-none">
         $USER_OPTIONS
       </select>
@@ -1147,18 +1147,34 @@ async def bot_page():
         msg_count = (await cur.fetchone())["c"]
         cur = await db.execute("SELECT COUNT(*) c FROM channels")
         ch_count = (await cur.fetchone())["c"]
-
-    user_options_html = "".join(
-        f'<option value="{u["tg_user_id"]}" {"selected" if u==DEFAULT_ACTIVE_USER else ""}>'
-        f'{u["role"]} (@{u["username"]})</option>'
-        for u in DEMO_USERS
-    )
+        # 从数据库加载真实用户列表（最多 50 个，按注册时间倒序）
+        cur = await db.execute(
+            "SELECT id, tg_user_id, username, role FROM users ORDER BY id DESC LIMIT 50"
+        )
+        rows = [dict(r) for r in await cur.fetchall()]
+        if rows:
+            # 默认选中最新一个用户
+            default_user = rows[0]
+            user_options_html = "".join(
+                f'<option value="{r["tg_user_id"]}" {"selected" if r==default_user else ""}>'
+                f'{r.get("role") or "普通会员"} (@{r["username"]})</option>'
+                for r in rows
+            )
+            default_tg_user_id = str(default_user["tg_user_id"])
+        else:
+            # 无用户时回退到演示用户
+            user_options_html = "".join(
+                f'<option value="{u["tg_user_id"]}" {"selected" if u==DEFAULT_ACTIVE_USER else ""}>'
+                f'{u["role"]} (@{u["username"]})</option>'
+                for u in DEMO_USERS
+            )
+            default_tg_user_id = str(DEFAULT_ACTIVE_USER["tg_user_id"])
 
     html_out = BOT_PAGE_HTML.replace("{{", "{").replace("}}", "}")
     html_out = html_out.replace("$MSG_COUNT_LABEL", f"{msg_count:,}+ 消息索引")
     html_out = html_out.replace("$CHANNEL_COUNT", str(ch_count))
     html_out = html_out.replace("$USER_OPTIONS", user_options_html)
-    html_out = html_out.replace("$DEFAULT_USER_ID", str(DEFAULT_ACTIVE_USER["tg_user_id"]))
+    html_out = html_out.replace("$DEFAULT_USER_ID", default_tg_user_id)
     return HTMLResponse(html_out)
 
 
