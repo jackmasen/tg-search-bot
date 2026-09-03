@@ -762,13 +762,32 @@ function renderBotResponse(data) {{
     html += '</div>';
   }}
 
+  // AI提示和关联词
+  if (data.ai_keyword_hint) {{
+    html += `<div class="mt-3 p-2 rounded-lg bg-purple-900/30 border border-purple-600/40">
+      <div class="text-xs text-purple-300 font-semibold mb-1">💡 AI智能扩展</div>
+      <div class="text-xs text-purple-200/80 leading-relaxed">${{data.ai_keyword_hint}}</div>
+    </div>`;
+  }}
+  if (data.ai_expanded_keywords && data.ai_expanded_keywords.length) {{
+    html += `<div class="mt-2">
+      <div class="text-xs text-purple-400 mb-1.5 font-semibold">🔗 AI关联搜索词（点击直达）</div>
+      <div class="flex flex-wrap gap-1.5">`;
+    for (const kw of data.ai_expanded_keywords) {{
+      html += `<button onclick="sendCmd('${{kw}}')" class="px-2.5 py-1 bg-purple-700/50 hover:bg-purple-600 text-purple-200 text-[11px] rounded-full border border-purple-500/40 transition-colors">🔍 ${{escapeHtml(kw)}}</button>`;
+    }}
+    html += '</div></div>';
+  }}
+
   // 搜索结果展示（公网数据：消息 + 频道兜底）
   if (data.search_results && data.search_results.length) {{
     const kw = data.keyword || '';
+    const aiKws = (data.ai_expanded_keywords || []).map(k => k.toLowerCase());
     html += `<div class="mt-3 text-xs text-gray-400 mb-1">🔎 搜索结果（${{data.search_results.length}} 条）：</div>`;
     for (const item of data.search_results) {{
       // 频道结果：有 target_url 且无 content（或 content 很短）
       const isChannel = item.target_url && (!item.content || item.content.length < 20);
+      const isAiResult = item.ai_keyword && aiKws.includes(item.ai_keyword.toLowerCase());
       if (isChannel) {{
         const title = escapeHtml(item.title || item.channel_title || '频道');
         const desc = escapeHtml(item.description || '');
@@ -776,8 +795,11 @@ function renderBotResponse(data) {{
         const members = item.member_count || 0;
         const cat = item.category || '';
         html += `
-          <div class="mt-1 p-2.5 rounded-lg bg-[#0e1621] border-l-2 border-sky-500">
-            <div class="text-[11px] text-sky-300 mb-0.5">#${{title}}</div>
+          <div class="mt-1 p-2.5 rounded-lg ${{isAiResult ? 'bg-purple-900/20 border-purple-500/50' : 'bg-[#0e1621] border-l-2 border-sky-500'}}">
+            <div class="flex items-center gap-1 mb-0.5">
+              <div class="text-[11px] text-sky-300">#${{title}}</div>
+              ${{isAiResult ? '<span class="text-[9px] bg-purple-600/60 text-purple-200 px-1 py-0.2 rounded">AI扩展</span>' : ''}}
+            </div>
             ${{desc ? `<div class="text-sm leading-relaxed">${{highlight(desc, kw)}}</div>` : ''}}
             <div class="mt-1 flex items-center gap-2 text-[11px] text-gray-400">
               ${{cat ? `<span class="bg-sky-800/60 text-sky-200 px-1.5 py-0.5 rounded">${{escapeHtml(cat)}}</span>` : ''}}
@@ -787,8 +809,11 @@ function renderBotResponse(data) {{
           </div>`;
       }} else {{
         html += `
-          <div class="mt-1 p-2.5 rounded-lg bg-[#0e1621] border-l-2 border-sky-500">
-            <div class="text-[11px] text-sky-300 mb-0.5">#${{item.channel_title || '频道'}}${{item.msg_date ? ' · ' + item.msg_date : ''}}</div>
+          <div class="mt-1 p-2.5 rounded-lg ${{isAiResult ? 'bg-purple-900/20 border border-purple-500/50' : 'bg-[#0e1621] border-l-2 border-sky-500'}}">
+            <div class="flex items-center gap-1 mb-0.5">
+              <div class="text-[11px] text-sky-300">#${{item.channel_title || '频道'}}${{item.msg_date ? ' · ' + item.msg_date : ''}}</div>
+              ${{isAiResult ? '<span class="text-[9px] bg-purple-600/60 text-purple-200 px-1 py-0.2 rounded">AI扩展</span>' : ''}}
+            </div>
             <div class="text-sm leading-relaxed">${{highlight(item.content, kw)}}</div>
           </div>`;
       }}
@@ -1874,15 +1899,135 @@ async def api_admin_crawler_default_api(request: Request):
 
 
 
+@app.get("/debug/ai-status")
+async def debug_ai_status():
+    """调试端点：查看AI服务详细状态"""
+    try:
+        from app.ai.model_service import ai_service
+        pool_info = ai_service.get_pool_info()
+        ai_health = await ai_service.health_check()
+
+        # 测试一次实际API调用
+        test_result = {"error": "", "content": ""}
+        if ai_service._api_keys:
+            try:
+                result = await ai_service.expand_keyword("测试")
+                expanded = result.get("expanded", {})
+                test_result = {
+                    "content_preview": result.get("content", "")[:200],
+                    "pool_used": result.get("pool_used", ""),
+                    "tokens_used": result.get("tokens_used", 0),
+                    "expanded": expanded,
+                }
+            except Exception as e:
+                test_result["error"] = str(e)[:200]
+        else:
+            test_result["error"] = "no_api_keys"
+
+        return JSONResponse({
+            "is_configured": ai_service.is_configured(),
+            "keyword_expand": ai_service.keyword_expand,
+            "api_keys_count": len(ai_service._api_keys),
+            "pool_info": pool_info,
+            "health": ai_health,
+            "test_expand": test_result,
+        })
+    except Exception as e:
+        return JSONResponse({"error": str(e)})
+
+
+@app.get("/debug/ai-search-test")
+async def debug_ai_search_test(keyword: str = "测试"):
+    """精确镜像搜索路径的AI诊断端点"""
+    try:
+        from app.ai.model_service import ai_service
+        _is_config = ai_service.is_configured()
+        _kw_expand = ai_service.keyword_expand
+        _keys_count = len(ai_service._api_keys)
+        _keys_names = [k.get("name") for k in ai_service._api_keys]
+        _keys_active = [k.get("active", True) for k in ai_service._api_keys]
+        expand_result = await ai_service.expand_keyword(keyword)
+        expanded = expand_result.get("expanded", {})
+        related = expanded.get("related_keywords", [])
+        _hint = expanded.get("search_hint", "")
+        _expanded_kws = [kw for kw in related if kw and kw != keyword][:4]
+        return JSONResponse({
+            "keyword": keyword,
+            "is_configured": _is_config,
+            "keyword_expand": _kw_expand,
+            "api_keys_count": _keys_count,
+            "api_keys_names": _keys_names,
+            "api_keys_active": _keys_active,
+            "expand_result_keys": list(expand_result.keys()),
+            "expanded_dict": expanded,
+            "related_keywords": related,
+            "search_hint": _hint,
+            "ai_expanded_keywords": _expanded_kws,
+            "content_preview": expand_result.get("content", "")[:300],
+            "pool_used": expand_result.get("pool_used", ""),
+        })
+    except Exception as e:
+        return JSONResponse({"error": str(e)})
+
+
+@app.get("/debug/search-ai-mirror")
+async def debug_search_ai_mirror(keyword: str = "测试"):
+    """精确镜像search_with_ads_priority中的AI扩展路径，返回所有中间值"""
+    try:
+        from app.ai.model_service import ai_service
+        # 完全复制搜索函数的AI扩展代码路径
+        _is_config = ai_service.is_configured()
+        _kw_expand = ai_service.keyword_expand
+        _keys_count = len(ai_service._api_keys)
+        _keys_names = [k.get("name") for k in ai_service._api_keys]
+        result = {
+            "keyword": keyword,
+            "is_configured": _is_config,
+            "keyword_expand": _kw_expand,
+            "api_keys_count": _keys_count,
+            "api_keys_names": _keys_names,
+        }
+        if _is_config and _kw_expand:
+            expand_result = await ai_service.expand_keyword(keyword)
+            result["expand_result_keys"] = list(expand_result.keys())
+            result["has_expanded_key"] = "expanded" in expand_result
+            expanded = expand_result.get("expanded", {})
+            result["expanded_dict"] = expanded
+            related = expanded.get("related_keywords", [])
+            result["related_keywords"] = related
+            hint = expanded.get("search_hint", "")
+            result["search_hint"] = hint
+            expanded_kws = [kw for kw in related if kw and kw != keyword][:4]
+            result["ai_expanded_keywords"] = expanded_kws
+            result["content_preview"] = expand_result.get("content", "")[:300]
+            result["pool_used"] = expand_result.get("pool_used", "")
+            result["tokens_used"] = expand_result.get("tokens_used", 0)
+        else:
+            result["skip_reason"] = f"is_configured={_is_config}, keyword_expand={_kw_expand}"
+        return JSONResponse(result)
+    except Exception as e:
+        import traceback
+        return JSONResponse({"error": str(e), "traceback": traceback.format_exc()})
+
+
 @app.get("/health")
 async def health_check():
     """健康检查"""
+    try:
+        from app.ai.model_service import ai_service
+        pool_info = ai_service.get_pool_info()
+        ai_health = await ai_service.health_check()
+    except Exception as e:
+        pool_info = {"total": 0, "active": 0, "keys": [], "error": str(e)}
+        ai_health = {"keys": [], "healthy_count": 0, "error": str(e)}
     return JSONResponse({
         "status": "healthy",
         "version": Config.APP_VERSION,
         "bot_token_configured": bool(Config.BOT_TOKEN),
         "account_pool_size": len(Config.API_IDS),
         "db_path": Config.DB_PATH,
+        "ai_pool": pool_info,
+        "ai_health": ai_health,
     })
 
 
@@ -5174,11 +5319,15 @@ async def search_messages(keyword: str, limit=5):
 
 
 async def search_with_ads_priority(keyword: str, tg_user_id: int):
-    """AI智能搜索：优先展示广告和推广频道，不足部分用公网数据补充"""
+    """AI智能搜索：优先展示广告和推广频道，不足部分用AI扩展关键词+公网数据补充，多结果展示"""
     priority_ads = []
     priority_channels = []
+    ai_keyword_hint = ""
+    ai_expanded_keywords = []
+
+    # 1. 获取匹配广告（最多5条）
     try:
-        ads = await ad_manager.get_ads_for_keyword(keyword, limit=3)
+        ads = await ad_manager.get_ads_for_keyword(keyword, limit=5)
         for ad in ads:
             remaining = max(0.0, (ad.get("daily_budget") or 0) - (ad.get("daily_spent") or 0))
             ad["remaining_budget"] = remaining
@@ -5186,30 +5335,118 @@ async def search_with_ads_priority(keyword: str, tg_user_id: int):
     except Exception as e:
         print(f"[搜索] 广告查询失败: {e}")
 
+    # 2. 获取置顶推广频道（最多5条）
     try:
         async with get_db() as db:
             cur = await db.execute(
                 """SELECT * FROM channels
-                   WHERE is_featured = 1 AND status = 'active'
+                   WHERE is_featured = 1
                    ORDER BY sort_order ASC, id ASC
-                   LIMIT 3""",
+                   LIMIT 5""",
             )
             rows = await cur.fetchall()
             priority_channels = [dict(row) for row in rows]
     except Exception as e:
         print(f"[搜索] 置顶频道查询失败: {e}")
 
-    total_limit = 5
-    ad_count = len(priority_ads) + len(priority_channels)
-    public_limit = max(0, total_limit - ad_count)
-    public_results = await search_messages(keyword, limit=public_limit) if public_limit > 0 else []
+    # 3. FTS5消息搜索 + channels表兜底（主关键词，最多10条）
+    main_results = await search_messages(keyword, limit=10)
+
+    # 4. 如果主关键词结果不足，使用AI扩展关键词搜索更多结果
+    all_extra_results = []
+    _debug_ai = {}
+    try:
+        from app.ai.model_service import ai_service
+        _is_config = ai_service.is_configured()
+        _kw_expand = ai_service.keyword_expand
+        print(f"[搜索] AI检查: keyword={keyword!r}, is_configured={_is_config}, keyword_expand={_kw_expand}, api_keys_count={len(ai_service._api_keys)}")
+        _debug_ai["is_configured"] = _is_config
+        _debug_ai["keyword_expand"] = _kw_expand
+        _debug_ai["keys_count"] = len(ai_service._api_keys)
+        print(f"[搜索] AI检查完成: 准备进入if块... is_configured={bool(_is_config)}, keyword_expand={bool(_kw_expand)}")
+        if _is_config and _kw_expand:
+            print(f"[搜索] AI: 进入if块，开始调用expand_keyword...")
+            expand_result = await ai_service.expand_keyword(keyword)
+            print(f"[搜索] AI扩展结果: {_json.dumps(expand_result, ensure_ascii=False, default=str)[:500]}")
+            print(f"[搜索] AI扩展结果keys: {list(expand_result.keys())}")
+            expanded = expand_result.get("expanded", {})
+            print(f"[搜索] expanded dict: {_json.dumps(expanded, ensure_ascii=False)[:300]}")
+            related = expanded.get("related_keywords", [])
+            ai_keyword_hint = expanded.get("search_hint", "")
+            ai_expanded_keywords = [kw for kw in related if kw and kw != keyword][:4]
+            print(f"[搜索] AI展开词: {ai_expanded_keywords}, hint={ai_keyword_hint!r}")
+            _debug_ai["related"] = related
+            _debug_ai["hint"] = ai_keyword_hint
+            _debug_ai["expanded_keywords"] = ai_expanded_keywords
+
+            if ai_expanded_keywords and len(main_results) < 8:
+                seen_titles = {r.get("title") or r.get("channel_title") or r.get("keyword") or "" for r in main_results}
+                for ext_kw in ai_expanded_keywords:
+                    ext_results = await search_messages(ext_kw, limit=3)
+                    for r in ext_results:
+                        key = r.get("title") or r.get("channel_title") or r.get("keyword") or ""
+                        if key and key not in seen_titles:
+                            seen_titles.add(key)
+                            r["ai_keyword"] = ext_kw
+                            all_extra_results.append(r)
+                    if len(all_extra_results) >= 10:
+                        break
+    except Exception as e:
+        import traceback as _tb
+        _err_msg = str(e)
+        _err_tb = _tb.format_exc()
+        print(f"[搜索] AI扩展关键词失败: {_err_msg}")
+        print(f"[搜索] 异常堆栈:\n{_err_tb}")
+        _debug_ai["error"] = _err_msg
+        _debug_ai["error_type"] = type(e).__name__
+        _debug_ai["error_tb"] = _err_tb[:500]
+
+    # 5. 合并结果：主结果 + AI扩展结果（去重），最多20条
+    all_results = list(main_results)
+    for r in all_extra_results:
+        key = r.get("title") or r.get("channel_title") or r.get("keyword") or ""
+        if key and key not in {x.get("title") or x.get("channel_title") or x.get("keyword") or "" for x in all_results}:
+            all_results.append(r)
+    all_results = all_results[:20]
 
     return {
         "priority_ads": priority_ads,
         "priority_channels": priority_channels,
-        "public_results": public_results,
+        "search_results": all_results,
         "ad_result": priority_ads[0] if priority_ads else None,
+        "ai_keyword_hint": ai_keyword_hint,
+        "ai_expanded_keywords": ai_expanded_keywords,
+        "_debug_ai": _debug_ai,
     }
+
+
+@app.get("/debug/search-full-test")
+async def debug_search_full_test(keyword: str = "测试", tg_user_id: int = 900001):
+    """完整搜索测试：直接调用search_with_ads_priority并返回全部中间值"""
+    try:
+        result = await search_with_ads_priority(keyword, tg_user_id)
+        from app.ai.model_service import ai_service
+        expand_result = await ai_service.expand_keyword(keyword)
+        return JSONResponse({
+            "keyword": keyword,
+            "tg_user_id": tg_user_id,
+            "search_result_keys": list(result.keys()),
+            "priority_ads_count": len(result.get("priority_ads", [])),
+            "priority_channels_count": len(result.get("priority_channels", [])),
+            "search_results_count": len(result.get("search_results", [])),
+            "ai_keyword_hint": result.get("ai_keyword_hint", ""),
+            "ai_expanded_keywords": result.get("ai_expanded_keywords", []),
+            "debug_ai": result.get("_debug_ai", {}),
+            "expand_debug": {
+                "keys": list(expand_result.keys()),
+                "has_expanded": "expanded" in expand_result,
+                "expanded": expand_result.get("expanded", {}),
+                "content_preview": expand_result.get("content", "")[:200],
+            },
+        })
+    except Exception as e:
+        import traceback
+        return JSONResponse({"error": str(e), "traceback": traceback.format_exc()})
 
 
 async def get_ad_if_match(keyword: str, searcher_tg_id: int):
@@ -5850,12 +6087,19 @@ async def api_bot_command(request: Request):
     search_data = await search_with_ads_priority(keyword, tg_user_id)
     priority_ads = search_data["priority_ads"]
     priority_channels = search_data["priority_channels"]
-    results = search_data["public_results"]
+    results = search_data["search_results"]
     ad_result = search_data["ad_result"]
+    ai_keyword_hint = search_data.get("ai_keyword_hint", "")
+    ai_expanded_keywords = search_data.get("ai_expanded_keywords", [])
 
     reply_html = f"🔎 搜索关键词：<b class='text-yellow-300'>{keyword}</b><br>"
     if priority_ads or priority_channels:
         reply_html += f"<span class='text-[11px] text-amber-400'>📣 展示 {len(priority_ads)} 条广告 + {len(priority_channels)} 个置顶频道，其余为公网数据</span><br>"
+    if ai_keyword_hint:
+        reply_html += f"<span class='text-[11px] text-sky-400'>💡 {ai_keyword_hint}</span><br>"
+    if ai_expanded_keywords:
+        kw_display = " ".join(f"「{kw}」" for kw in ai_expanded_keywords)
+        reply_html += f"<span class='text-[11px] text-purple-400'>🔗 关联词：{kw_display}</span><br>"
     if not results and not priority_ads and not priority_channels:
         reply_html += "<span class='text-gray-400 text-sm'>暂未找到相关内容（试试其他词：比特币/AI/空投/Python/FastAPI）</span><br>"
     reply_html += "<span class='text-xs text-gray-500'>（包含频道目录 + 消息索引）</span>"
@@ -5867,12 +6111,12 @@ async def api_bot_command(request: Request):
         "priority_channels": priority_channels,
         "search_results": results,
         "ad_result": ad_result,
+        "ai_keyword_hint": ai_keyword_hint,
+        "ai_expanded_keywords": ai_expanded_keywords,
         "actions": [
             {"text": "📊 数据统计 /stats", "cmd": "/stats"},
             {"text": "📣 我要投广告", "cmd": "/advertise"},
-            {"text": "🔁 搜：空投", "cmd": "空投"},
-            {"text": "🔁 搜：Python", "cmd": "Python"},
-        ],
+        ] + ([{"text": f"🔁 搜：{kw}", "cmd": kw} for kw in ai_expanded_keywords[:4]] if ai_expanded_keywords else [{"text": "🔁 搜：空投", "cmd": "空投"}, {"text": "🔁 搜：Python", "cmd": "Python"}]),
     })
 
 

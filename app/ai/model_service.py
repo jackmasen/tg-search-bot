@@ -247,24 +247,44 @@ class AIService:
 
     async def expand_keyword(self, keyword: str) -> dict:
         if not self.keyword_expand or not self.is_configured():
+            logger.warning(f"AI扩展跳过: keyword_expand={self.keyword_expand}, is_configured={self.is_configured()}, api_keys={len(self._api_keys)}")
             return {"main_keyword": keyword, "related_keywords": [keyword], "search_hint": ""}
 
         messages = [
             {"role": "system", "content": self.search_system_prompt},
             {"role": "user", "content": keyword},
         ]
+        logger.info(f"AI开始扩展关键词: {keyword!r}, api_keys={len(self._api_keys)}, keys={[k.get('name') for k in self._api_keys]}")
         result = await self._call_api(messages)
         content = result.get("content", "")
+        pool_used = result.get("pool_used", "")
+        logger.info(f"AI扩展结果: pool_used={pool_used!r}, content={content!r}")
 
         expanded = {"main_keyword": keyword, "related_keywords": [keyword], "search_hint": ""}
+        if content.startswith("❌") or "不可用" in content or "未配置" in content:
+            logger.warning(f"AI扩展失败: {content[:200]}")
+            result["expanded"] = expanded
+            result["tokens_used"] = 0
+            return result
+        # 去除markdown代码块包裹（如 ```json ... ``` 或 前导换行+代码块）
+        # 使用贪婪匹配 .* 确保匹配到最后一个 ```，避免匹配到嵌套的内部代码块
+        import re as _re
+        clean = content.strip()
+        # 匹配 ```json ... ``` 或 ``` ... ``` （贪婪模式 .* 确保匹配到最后一个 ```）
+        _m = _re.search(r'```(?:json)?\s*(.*)\s*```', clean, _re.DOTALL)
+        if _m:
+            clean = _m.group(1).strip()
         try:
-            parsed = json.loads(content)
+            parsed = json.loads(clean)
             expanded.update(parsed)
-        except (json.JSONDecodeError, TypeError):
+        except (json.JSONDecodeError, TypeError) as e:
+            logger.warning(f"AI扩展JSON解析失败: {e}, content={content[:200]!r}")
             expanded["search_hint"] = content[:100] if content else ""
 
         result["expanded"] = expanded
         result["tokens_used"] = result.get("input_tokens", 0) + result.get("output_tokens", 0)
+        logger.info(f"AI扩展成功: expanded={json.dumps(expanded, ensure_ascii=False)}, hint={expanded.get('search_hint')!r}")
+        logger.info(f"AI扩展返回keys: {list(result.keys())}")
         return result
 
     async def summarize_search_results(self, keyword: str, results: list) -> str:

@@ -9,6 +9,7 @@ local_files = {
     'admin_template.html': r'C:\Users\ai\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\work-mode-projects\6a8713b5d7ac5d58514066c4\tg-search-bot\admin_template.html',
     'server.py': r'C:\Users\ai\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\work-mode-projects\6a8713b5d7ac5d58514066c4\tg-search-bot\server.py',
     'app/advertising/ad_manager.py': r'C:\Users\ai\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\work-mode-projects\6a8713b5d7ac5d58514066c4\tg-search-bot\app\advertising\ad_manager.py',
+    'app/ai/model_service.py': r'C:\Users\ai\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\work-mode-projects\6a8713b5d7ac5d58514066c4\tg-search-bot\app\ai\model_service.py',
 }
 
 client = paramiko.SSHClient()
