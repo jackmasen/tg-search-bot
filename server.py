@@ -3826,6 +3826,25 @@ async def api_admin_ad_campaign_update(request: Request):
 # 热门关键词 API
 # =========================================================================
 
+@app.get("/api/demo/hot_keywords")
+async def api_demo_hot_keywords():
+    """演示页专用：公开热词接口（无需登录）"""
+    try:
+        async with get_db() as db:
+            cur = await db.execute("SELECT * FROM hot_keywords ORDER BY display_order ASC, id ASC")
+            rows = [dict(r) for r in await cur.fetchall()]
+        categories = {}
+        for row in rows:
+            cat = row.get("category") or "其他"
+            kw = row.get("keyword") or ""
+            if cat not in categories:
+                categories[cat] = {"keywords": []}
+            categories[cat]["keywords"].append(kw)
+        return JSONResponse({"ok": True, "categories": categories, "count": len(rows)})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)[:200]})
+
+
 @app.get("/api/admin/hot_keywords")
 async def api_admin_hot_keywords(request: Request):
     session_id = request.query_params.get("session_id", "")
@@ -6904,6 +6923,124 @@ async def api_admin_ai_auto_switch(request: Request):
     return JSONResponse({"ok": True, "auto_switching": _ai_health_status["auto_switching"]})
 
 
+# =========================================================================
+# 演示页（Demo Designer） — 模块化拖拽布局 + 一键推送到Bot
+# =========================================================================
+
+@app.get("/demo", response_class=HTMLResponse)
+async def demo_page():
+    """演示设计器页面：16:9竖屏手机预览 + 模块化拖拽排序 + 一键推送Bot"""
+    try:
+        from starlette.responses import FileResponse as _FR
+        _path = Path(__file__).parent / "templates" / "demo.html"
+        if _path.exists():
+            return _FR(str(_path))
+    except Exception as _e:
+        return HTMLResponse(f"<pre>加载失败: {_e}</pre>", status_code=500)
+    return HTMLResponse("<h1>演示页未找到</h1>")
+
+
+@app.get("/api/demo/config")
+async def get_demo_config():
+    """获取演示布局配置（从系统设置表读取）"""
+    try:
+        from app.admin.system_settings_manager import load_all_settings_from_db
+        settings = await load_all_settings_from_db()
+        layout = settings.get("demo_layout")
+        if layout:
+            try:
+                parsed = _json.loads(layout)
+                return JSONResponse({"ok": True, "layout": parsed})
+            except Exception:
+                return JSONResponse({"ok": True, "layout": {}})
+        return JSONResponse({"ok": True, "layout": {}})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)[:200]})
+
+
+@app.post("/api/demo/config")
+async def update_demo_config(request: Request):
+    """保存演示布局配置（写入系统设置表）"""
+    try:
+        from app.admin.system_settings_manager import upsert_setting
+        p = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "格式错误"}, status_code=400)
+    layout = p.get("layout", {})
+    try:
+        layout_json = _json.dumps(layout, ensure_ascii=False)
+        await upsert_setting("demo_layout", layout_json)
+        return JSONResponse({"ok": True, "message": "布局已保存"})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)[:200]})
+
+
+@app.post("/api/bot/push_demo")
+async def push_demo_to_bot(request: Request):
+    """一键推送到Bot：将演示布局配置序列化后推送至管理员Telegram"""
+    try:
+        p = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "格式错误"}, status_code=400)
+    token = Config.BOT_TOKEN
+    if not token:
+        return JSONResponse({"ok": False, "error": "TG_BOT_TOKEN 未配置"}, status_code=400)
+    admins = Config.ADMIN_TG_IDS or []
+    if not admins:
+        return JSONResponse({"ok": False, "error": "ADMIN_TG_IDS 未配置"}, status_code=400)
+    import httpx as _hx
+    layout = p.get("layout", {})
+    modules = layout.get("modules", [])
+    columns = layout.get("columns", 1)
+    user_id = layout.get("user_id", 10000001)
+    # 构建推送内容摘要
+    module_names = []
+    for m in modules:
+        t = m.get("type", "")
+        name_map = {
+            "search_box": "🔍 搜索框", "result_list": "📋 搜索结果",
+            "hot_keywords": "⭐ 热门搜索", "ads": "📣 广告卡片",
+            "wallet": "💰 钱包余额", "stats": "📊 数据统计",
+            "quick_actions": "⚡ 快捷操作", "custom_html": "📝 自定义HTML",
+        }
+        module_names.append(name_map.get(t, t))
+    layout_summary = f"📱 <b>TG搜索机器人 · 演示布局</b>\n\n"
+    layout_summary += f"布局格式：{columns} 列\n"
+    layout_summary += f"演示用户：TG {user_id}\n"
+    layout_summary += f"模块数量：{len(modules)} 个\n\n"
+    layout_summary += "📦 模块列表：\n"
+    for i, name in enumerate(module_names, 1):
+        layout_summary += f"  {i}. {name}\n"
+    layout_summary += "\n💡 提示：请在Bot端输入 /start 查看完整首页效果"
+    results_list = []
+    ok_count = 0
+    try:
+        async with _hx.AsyncClient(timeout=_hx.Timeout(15.0, connect=8.0)) as client:
+            for uid in admins:
+                try:
+                    r = await client.post(
+                        f"https://api.telegram.org/bot{token}/sendMessage",
+                        json={"chat_id": int(uid), "text": layout_summary, "parse_mode": "HTML"},
+                    )
+                    data = r.json()
+                    if data.get("ok"):
+                        ok_count += 1
+                        results_list.append(f"✅ 推送至管理员 {uid} 成功")
+                    else:
+                        results_list.append(f"⚠️ 推送至 {uid} 失败：{data.get('description','')}")
+                except Exception as e:
+                    results_list.append(f"❌ 推送至 {uid} 异常：{str(e)[:60]}")
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": f"HTTP 请求失败：{str(e)[:100]}"}, status_code=500)
+    return JSONResponse({
+        "ok": ok_count > 0,
+        "sent_count": ok_count,
+        "results": results_list,
+        "module_count": len(modules),
+        "columns": columns,
+    })
+
+
 if __name__ == "__main__":
     import asyncio
     print("=" * 60)
@@ -6913,6 +7050,7 @@ if __name__ == "__main__":
     print("=" * 60)
     print(f"  用户界面:  http://127.0.0.1:{_port}")
     print(f"  管理后台:  http://127.0.0.1:{_port}/admin")
+    print(f"  演示设计器: http://127.0.0.1:{_port}/demo")
     print(f"  健康检查:  http://127.0.0.1:{_port}/health")
     print("=" * 60)
 

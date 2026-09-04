@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TG搜索机器人 - 演示设计器</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/interactjs/dist/interact.min.js"></script>
+<style>
+:root { --phone-w: 375px; --phone-h: 667px; --accent: #2AABEE; }
+* { box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; margin: 0; }
+.topbar { background: #1e293b; border-bottom: 1px solid #334155; padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 200; }
+.topbar-title { font-size: 16px; font-weight: 700; color: #f8fafc; }
+.topbar-sub { font-size: 11px; color: #94a3b8; margin-top: 2px; }
+.main-layout { display: flex; gap: 24px; padding: 24px; max-width: 1400px; margin: 0 auto; align-items: flex-start; }
+.panel-left { width: 300px; flex-shrink: 0; display: flex; flex-direction: column; gap: 12px; }
+.tool-card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 16px; }
+.tool-card h3 { font-size: 13px; font-weight: 600; color: #f8fafc; margin: 0 0 12px 0; display: flex; align-items: center; gap: 6px; }
+.tool-card h3 .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); display: inline-block; }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 8px 16px; border-radius: 8px; border: none; cursor: pointer; font-size: 13px; font-weight: 500; transition: all 0.15s; width: 100%; }
+.btn:hover { transform: translateY(-1px); filter: brightness(1.1); }
+.btn:active { transform: translateY(0); }
+.btn-primary { background: linear-gradient(135deg, #2563eb, #3b82f6); color: #fff; }
+.btn-success { background: linear-gradient(135deg, #059669, #10b981); color: #fff; }
+.btn-warning { background: linear-gradient(135deg, #d97706, #f59e0b); color: #fff; }
+.btn-sm { padding: 5px 10px; font-size: 11px; width: auto; }
+.btn-row { display: flex; gap: 8px; margin-top: 8px; }
+.btn-row .btn { flex: 1; }
+.module-list { display: flex; flex-direction: column; gap: 6px; }
+.module-item { display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: #0f172a; border: 1px solid #334155; border-radius: 8px; cursor: grab; font-size: 12px; transition: all 0.15s; }
+.module-item:hover { border-color: var(--accent); background: #1e293b; }
+.module-item.dragging { opacity: 0.5; border-color: var(--accent); }
+.module-item .mi-icon { font-size: 16px; }
+.module-item .mi-name { flex: 1; font-weight: 500; }
+.module-item .mi-toggle { width: 32px; height: 18px; border-radius: 9px; background: #334155; position: relative; cursor: pointer; transition: background 0.2s; }
+.module-item .mi-toggle.on { background: #10b981; }
+.module-item .mi-toggle::after { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; transition: left 0.2s; }
+.module-item .mi-toggle.on::after { left: 16px; }
+.module-item .mi-del { color: #ef4444; cursor: pointer; font-size: 14px; padding: 2px 4px; border-radius: 4px; }
+.module-item .mi-del:hover { background: rgba(239,68,68,0.2); }
+.preview-area { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.phone-frame { width: var(--phone-w); height: var(--phone-h); background: #17212b; border-radius: 36px; border: 3px solid #334155; overflow: hidden; position: relative; box-shadow: 0 0 60px rgba(42,171,238,0.15), 0 20px 60px rgba(0,0,0,0.5); }
+.phone-notch { position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: 120px; height: 28px; background: #0f172a; border-radius: 0 0 18px 18px; z-index: 10; }
+.phone-header { background: #17212b; padding: 36px 12px 10px; border-bottom: 1px solid #2b5278; display: flex; align-items: center; gap: 8px; }
+.phone-header .bot-avatar { width: 32px; height: 32px; border-radius: 50%; background: linear-gradient(135deg, #2563eb, #2AABEE); display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0; }
+.phone-header .bot-info { flex: 1; }
+.phone-header .bot-name { font-size: 13px; font-weight: 600; color: #fff; }
+.phone-header .bot-status { font-size: 10px; color: #10b981; }
+.phone-chat { padding: 10px; overflow-y: auto; height: calc(var(--phone-h) - 70px - 50px); display: flex; flex-direction: column; gap: 6px; }
+.phone-chat::-webkit-scrollbar { width: 3px; }
+.phone-chat::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+.phone-input-bar { position: absolute; bottom: 0; left: 0; right: 0; background: #17212b; border-top: 1px solid #2b5278; padding: 8px 10px; display: flex; gap: 6px; align-items: center; }
+.phone-input-bar input { flex: 1; background: #0e1621; border: 1px solid #2b5278; border-radius: 20px; padding: 7px 14px; color: #fff; font-size: 13px; outline: none; }
+.phone-input-bar input::placeholder { color: #4a5568; }
+.phone-input-bar button { width: 34px; height: 34px; background: linear-gradient(135deg, #2563eb, #2AABEE); border: none; border-radius: 50%; color: #fff; font-size: 16px; cursor: pointer; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+.phone-input-bar button:hover { filter: brightness(1.15); }
+.msg { max-width: 88%; padding: 8px 12px; border-radius: 12px; font-size: 12px; line-height: 1.6; word-break: break-word; }
+.msg-bot { background: #182533; align-self: flex-start; border-bottom-left-radius: 4px; }
+.msg-user { background: #2b5278; align-self: flex-end; border-bottom-right-radius: 4px; }
+.msg-fade { animation: fade 0.25s ease-in; }
+@keyframes fade { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.module-slot { position: absolute; background: #182533; border: 1px solid #2b5278; border-radius: 12px; overflow: hidden; min-width: 60px; min-height: 40px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); transition: box-shadow 0.15s; }
+.module-slot:hover { border-color: var(--accent); box-shadow: 0 0 16px rgba(42,171,238,0.25); }
+.module-slot .ms-handle { position: absolute; top: 0; left: 0; right: 0; height: 24px; background: #1e3a5f; display: flex; align-items: center; padding: 0 8px; cursor: grab; font-size: 10px; color: #94a3b8; font-weight: 600; border-bottom: 1px solid #2b5278; user-select: none; }
+.module-slot .ms-handle:active { cursor: grabbing; }
+.module-slot .ms-handle .handle-dots { letter-spacing: 2px; margin-right: 4px; }
+.module-slot .ms-body { padding: 8px; overflow: auto; height: calc(100% - 24px); font-size: 11px; }
+.module-slot .ms-body::-webkit-scrollbar { width: 2px; }
+.module-slot .ms-body::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
+.module-slot .ms-resize { position: absolute; bottom: 0; right: 0; width: 16px; height: 16px; cursor: nwse-resize; background: linear-gradient(135deg, transparent 50%, #2b5278 50%); border-radius: 0 0 12px 0; }
+.module-slot .ms-resize:hover { background: linear-gradient(135deg, transparent 50%, var(--accent) 50%); }
+.module-slot .ms-del { position: absolute; top: 2px; right: 6px; color: #ef4444; cursor: pointer; font-size: 12px; line-height: 1; opacity: 0; transition: opacity 0.15s; }
+.module-slot:hover .ms-del { opacity: 1; }
+.module-slot .ms-del:hover { color: #ff6b6b; }
+.ad-row { display: flex; flex-direction: row; align-items: center; gap: 4px; padding: 5px 8px; border-radius: 8px; margin-bottom: 4px; background: linear-gradient(90deg,#1e3a5f,#2b5278); border: 1px solid rgba(255,255,255,0.06); font-size: 10px; }
+.ad-title { color: #fff; font-weight: 600; flex: 0 1 45%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ad-action { font-size: 9px; padding: 1px 6px; border-radius: 4px; white-space: nowrap; flex-shrink: 0; background: linear-gradient(135deg,#059669,#10b981); color: #fff; }
+.hot-kw-row { display: flex; align-items: center; gap: 4px; margin-bottom: 3px; font-size: 10px; }
+.hot-kw-label { color: #94a3b8; min-width: 50px; flex-shrink: 0; }
+.hot-kw-chips { display: flex; flex-wrap: wrap; gap: 3px; flex: 1; }
+.hot-kw-chip { font-size: 10px; background: #334155; color: #e2e8f0; padding: 1px 6px; border-radius: 999px; border: 1px solid #475569; cursor: pointer; white-space: nowrap; }
+.hot-kw-chip:hover { background: #475569; }
+.stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.stat-cell { background: #0f172a; border-radius: 6px; padding: 6px; text-align: center; }
+.stat-num { font-size: 14px; font-weight: 700; color: #2AABEE; }
+.stat-label { font-size: 9px; color: #94a3b8; margin-top: 2px; }
+.btn-group { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.action-btn { font-size: 10px; padding: 3px 8px; border-radius: 6px; background: #2b5278; color: #fff; border: none; cursor: pointer; white-space: nowrap; }
+.action-btn:hover { background: #3a6a9a; }
+.toast { position: fixed; top: 80px; right: 24px; background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 12px 18px; font-size: 13px; z-index: 9999; box-shadow: 0 8px 30px rgba(0,0,0,0.4); animation: slideIn 0.3s ease; max-width: 320px; }
+.toast.ok { border-color: #10b981; }
+.toast.err { border-color: #ef4444; }
+.toast.info { border-color: #2AABEE; }
+@keyframes slideIn { from { opacity: 0; transform: translateX(40px); } to { opacity: 1; transform: none; } }
+.tg-keyboard { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.tg-kb-btn { font-size: 10px; padding: 4px 8px; border-radius: 6px; background: #1e3a5f; color: #fff; border: 1px solid #2b5278; cursor: pointer; flex: 1 1 calc(50% - 2px); text-align: center; min-width: 80px; }
+.tg-kb-btn:hover { background: #2b5278; }
+.demo-search-box { display: flex; gap: 4px; margin-bottom: 6px; }
+.demo-search-box input { flex: 1; background: #0f172a; border: 1px solid #2b5278; border-radius: 8px; padding: 5px 10px; color: #fff; font-size: 11px; outline: none; }
+.demo-search-box button { background: linear-gradient(135deg,#2563eb,#2AABEE); border: none; border-radius: 8px; color: #fff; padding: 5px 12px; font-size: 11px; cursor: pointer; }
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+.modal-box { background: #1e293b; border: 1px solid #334155; border-radius: 16px; padding: 24px; max-width: 420px; width: 90%; }
+.modal-box h3 { margin: 0 0 16px; font-size: 16px; color: #f8fafc; }
+.modal-box label { font-size: 12px; color: #94a3b8; display: block; margin-bottom: 4px; }
+.modal-box input, .modal-box select, .modal-box textarea { width: 100%; background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 8px 12px; color: #fff; font-size: 13px; outline: none; margin-bottom: 12px; }
+.modal-box textarea { resize: vertical; min-height: 60px; }
+.modal-close { float: right; cursor: pointer; color: #94a3b8; font-size: 18px; }
+.modal-close:hover { color: #fff; }
+.format-tabs { display: flex; gap: 4px; margin-bottom: 12px; }
+.format-tab { flex: 1; padding: 6px 0; text-align: center; border-radius: 6px; background: #0f172a; border: 1px solid #334155; cursor: pointer; font-size: 11px; color: #94a3b8; transition: all 0.15s; }
+.format-tab.active { background: #2b5278; border-color: var(--accent); color: #fff; }
+.spinner { width: 16px; height: 16px; border: 2px solid #334155; border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; display: inline-block; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (max-width: 900px) { .main-layout { flex-direction: column; } .panel-left { width: 100%; flex-direction: row; flex-wrap: wrap; } .tool-card { flex: 1; min-width: 240px; } .phone-frame { width: 320px; height: 568px; } }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div>
+    <div class="topbar-title">🔍 TG搜索机器人 · 演示设计器</div>
+    <div class="topbar-sub">拖拽排列模块 · 实时预览 · 一键推送Bot</div>
+  </div>
+  <div style="display:flex;gap:8px;align-items:center;">
+    <select id="userSwitcher" style="background:#0f172a;color:#fff;border:1px solid #334155;border-radius:8px;padding:6px 10px;font-size:12px;">
+      <option value="10000001">👤 Alice (普通用户)</option>
+      <option value="10000002">📣 Bob (广告主)</option>
+      <option value="10000003">🛡️ Admin (管理员)</option>
+    </select>
+    <button class="btn btn-success btn-sm" onclick="pushToBot()" id="pushBtn">🚀 一键推送到Bot</button>
+    <a href="/admin" class="btn btn-sm" style="background:#334155;color:#fff;text-decoration:none;">⚙️ 管理后台</a>
+  </div>
+</div>
+
+<div class="main-layout">
+  <div class="panel-left">
+    <div class="tool-card">
+      <h3><span class="dot"></span>模块管理</h3>
+      <div class="module-list" id="moduleList"></div>
+      <div class="btn-row" style="margin-top:12px;">
+        <button class="btn btn-primary btn-sm" onclick="showAddModuleModal()">+ 添加模块</button>
+        <button class="btn btn-warning btn-sm" onclick="resetModules()">重置布局</button>
+      </div>
+    </div>
+    <div class="tool-card">
+      <h3><span class="dot" style="background:#f59e0b;"></span>布局格式</h3>
+      <div class="format-tabs" id="formatTabs">
+        <div class="format-tab active" data-cols="1" onclick="setLayout(1)">单列</div>
+        <div class="format-tab" data-cols="2" onclick="setLayout(2)">双列</div>
+        <div class="format-tab" data-cols="3" onclick="setLayout(3)">三列</div>
+      </div>
+      <div style="font-size:11px;color:#64748b;margin-top:4px;">💡 拖拽顶部横条移动模块 · 拖拽右下角缩放</div>
+    </div>
+    <div class="tool-card">
+      <h3><span class="dot" style="background:#10b981;"></span>快捷操作</h3>
+      <div style="display:flex;flex-direction:column;gap:6px;">
+        <button class="btn btn-primary btn-sm" onclick="previewStart()">📱 预览 /start 首页</button>
+        <button class="btn btn-success btn-sm" onclick="previewSearch('空投')">🔍 测试搜索「空投」</button>
+        <button class="btn btn-warning btn-sm" onclick="previewSearch('TRON')">🔍 测试搜索「TRON」</button>
+        <button class="btn btn-sm" style="background:#334155;color:#fff;" onclick="previewSearch('')">🔄 刷新页面数据</button>
+      </div>
+    </div>
+    <div class="tool-card">
+      <h3><span class="dot" style="background:#ef4444;"></span>推送日志</h3>
+      <div id="pushLog" style="font-size:11px;color:#94a3b8;max-height:120px;overflow-y:auto;">
+        <div style="color:#64748b;font-style:italic;">暂无推送记录</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="preview-area">
+    <div class="phone-frame" id="phoneFrame">
+      <div class="phone-notch"></div>
+      <div class="phone-header">
+        <div class="bot-avatar">🤖</div>
+        <div class="bot-info">
+          <div class="bot-name">TG搜索机器人</div>
+          <div class="bot-status">● 在线</div>
+        </div>
+        <div style="font-size:10px;color:#64748b;" id="currentUserLabel">Alice</div>
+      </div>
+      <div class="phone-chat" id="phoneChat">
+        <div class="msg msg-bot msg-fade">
+          👋 你好！我是 <b>TG搜索机器人</b><br>输入关键词即可搜索全网络电报频道内容<br><br>
+          <div class="tg-keyboard">
+            <div class="tg-kb-btn" onclick="sendCommand('/start')">🏠 首页</div>
+            <div class="tg-kb-btn" onclick="sendCommand('/stats')">📊 我的账户</div>
+            <div class="tg-kb-btn" onclick="sendCommand('/wallet')">💰 钱包</div>
+            <div class="tg-kb-btn" onclick="sendCommand('/recharge')">💵 充值</div>
+          </div>
+        </div>
+      </div>
+      <div class="phone-input-bar">
+        <input type="text" id="chatInput" placeholder="输入关键词搜索..." onkeydown="if(event.key==='Enter')sendCommand(this.value)">
+        <button onclick="sendCommand(document.getElementById('chatInput').value)">➤</button>
+      </div>
+      <div id="moduleContainer" style="position:absolute;top:70px;left:0;right:0;bottom:44px;pointer-events:none;"></div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="addModuleModal" style="display:none;" onclick="if(event.target===this)closeModal()">
+  <div class="modal-box">
+    <span class="modal-close" onclick="closeModal()">✕</span>
+    <h3>➕ 添加模块</h3>
+    <label>选择模块类型</label>
+    <select id="newModuleType" style="width:100%;background:#0f172a;border:1px solid #334155;border-radius:8px;padding:8px;color:#fff;margin-bottom:12px;">
+      <option value="search_box">🔍 搜索框</option>
+      <option value="result_list">📋 搜索结果列表</option>
+      <option value="hot_keywords">⭐ 热门搜索</option>
+      <option value="ads">📣 广告卡片</option>
+      <option value="wallet">💰 钱包余额</option>
+      <option value="stats">📊 数据统计</option>
+      <option value="quick_actions">⚡ 快捷操作按钮</option>
+      <option value="custom_html">📝 自定义HTML</option>
+    </select>
+    <label id="customHtmlLabel" style="display:none;">自定义HTML内容</label>
+    <textarea id="customHtmlContent" style="display:none;" placeholder="输入HTML内容..."></textarea>
+    <button class="btn btn-primary" onclick="addModule()">确认添加</button>
+  </div>
+</div>
+
+<div class="modal-overlay" id="pushModal" style="display:none;" onclick="if(event.target===this)closePushModal()">
+  <div class="modal-box">
+    <span class="modal-close" onclick="closePushModal()">✕</span>
+    <h3>🚀 推送到Bot</h3>
+    <div id="pushStatus" style="font-size:13px;color:#94a3b8;margin-bottom:12px;"></div>
+    <div id="pushResult" style="font-size:12px;color:#e2e8f0;background:#0f172a;border-radius:8px;padding:12px;max-height:200px;overflow-y:auto;"></div>
+  </div>
+</div>
+
+<script>
+const DEMO_USERS = [
+  { id: 10000001, name: 'Alice', role: '普通用户' },
+  { id: 10000002, name: 'Bob', role: '广告主' },
+  { id: 10000003, name: 'Admin', role: '管理员' },
+];
+let currentUser = DEMO_USERS[0];
+let layoutColumns = 1;
+let modules = [];
+let moduleCounter = 0;
+
+const MODULE_TYPES = {
+  search_box: { name: '搜索框', icon: '🔍', defaultW: 340, defaultH: 50, top: 75, left: 15 },
+  result_list: { name: '搜索结果', icon: '📋', defaultW: 340, defaultH: 200, top: 135, left: 15 },
+  hot_keywords: { name: '热门搜索', icon: '⭐', defaultW: 340, defaultH: 80, top: 135, left: 15 },
+  ads: { name: '广告卡片', icon: '📣', defaultW: 340, defaultH: 100, top: 225, left: 15 },
+  wallet: { name: '钱包余额', icon: '💰', defaultW: 165, defaultH: 80, top: 135, left: 15 },
+  stats: { name: '数据统计', icon: '📊', defaultW: 165, defaultH: 80, top: 225, left: 15 },
+  quick_actions: { name: '快捷操作', icon: '⚡', defaultW: 340, defaultH: 60, top: 335, left: 15 },
+  custom_html: { name: '自定义HTML', icon: '📝', defaultW: 340, defaultH: 100, top: 400, left: 15 },
+};
+
+const PRESET_MODULES = ['search_box', 'result_list', 'hot_keywords', 'ads', 'wallet', 'stats', 'quick_actions'];
+
+document.addEventListener('DOMContentLoaded', async () => {
+  await loadLayoutFromServer();
+  loadLayout();
+  renderModules();
+  setupInteract();
+  updateUserLabel();
+  document.getElementById('userSwitcher').addEventListener('change', (e) => {
+    const uid = parseInt(e.target.value);
+    currentUser = DEMO_USERS.find(u => u.id === uid) || DEMO_USERS[0];
+    updateUserLabel();
+    refreshAllModules();
+  });
+  document.getElementById('newModuleType').addEventListener('change', (e) => {
+    const isCustom = e.target.value === 'custom_html';
+    document.getElementById('customHtmlLabel').style.display = isCustom ? 'block' : 'none';
+    document.getElementById('customHtmlContent').style.display = isCustom ? 'block' : 'none';
+  });
+});
+
+function updateUserLabel() { document.getElementById('currentUserLabel').textContent = currentUser.name; }
+
+function loadLayout() {
+  const saved = localStorage.getItem('demoLayout');
+  if (saved) { try { modules = JSON.parse(saved); } catch(e) { modules = []; } }
+  if (!modules.length) {
+    const w = 375, gap = 8;
+    PRESET_MODULES.forEach((type, i) => {
+      const def = MODULE_TYPES[type];
+      if (layoutColumns === 1) {
+        modules.push({ id: ++moduleCounter, type, top: def.top + i * (def.defaultH + gap), left: 15, w: def.defaultW, h: def.defaultH, visible: true, customHtml: '' });
+      } else {
+        const col = i % layoutColumns, row = Math.floor(i / layoutColumns);
+        modules.push({ id: ++moduleCounter, type, top: def.top + row * (def.defaultH + gap), left: 15 + col * ((w - 30) / layoutColumns), w: (w - 30 - gap * (layoutColumns - 1)) / layoutColumns, h: def.defaultH, visible: true, customHtml: '' });
+      }
+    });
+  }
+}
+function saveLayout() { localStorage.setItem('demoLayout', JSON.stringify(modules)); }
+
+function resetModules() {
+  modules = []; moduleCounter = 0; layoutColumns = 1;
+  document.querySelectorAll('.format-tab').forEach(t => t.classList.remove('active'));
+  document.querySelector('.format-tab[data-cols="1"]').classList.add('active');
+  loadLayout(); renderModules(); saveLayout();
+  toast('已重置布局', 'info');
+}
+
+function setLayout(cols) {
+  layoutColumns = cols;
+  document.querySelectorAll('.format-tab').forEach(t => { t.classList.toggle('active', parseInt(t.dataset.cols) === cols); });
+  const w = 375, gap = 8;
+  modules.forEach((m, i) => {
+    const def = MODULE_TYPES[m.type];
+    const col = i % cols, row = Math.floor(i / cols);
+    m.left = 15 + col * ((w - 30 - gap * (cols - 1)) / cols);
+    m.top = def.top + row * (def.defaultH + gap);
+    m.w = (w - 30 - gap * (cols - 1)) / cols;
+  });
+  renderModules(); saveLayout();
+  toast(`已切换为 ${cols} 列布局`, 'info');
+}
+
+function showAddModuleModal() { document.getElementById('addModuleModal').style.display = 'flex'; }
+function closeModal() { document.getElementById('addModuleModal').style.display = 'none'; }
+
+function addModule() {
+  const type = document.getElementById('newModuleType').value;
+  const customHtml = document.getElementById('customHtmlContent').value;
+  const def = MODULE_TYPES[type];
+  const w = 375, gap = 8;
+  const col = modules.length % layoutColumns, row = Math.floor(modules.length / layoutColumns);
+  modules.push({ id: ++moduleCounter, type, top: def.top + row * (def.defaultH + gap), left: 15 + col * ((w - 30 - gap * (layoutColumns - 1)) / layoutColumns), w: def.defaultW, h: def.defaultH, visible: true, customHtml });
+  closeModal(); renderModules(); saveLayout();
+  toast(`已添加「${def.name}」模块`, 'ok');
+}
+
+function removeModule(id) { modules = modules.filter(m => m.id !== id); renderModules(); saveLayout(); }
+function toggleModule(id) { const m = modules.find(m => m.id === id); if (m) m.visible = !m.visible; renderModules(); saveLayout(); }
+
+function renderModules() {
+  const container = document.getElementById('moduleContainer');
+  container.innerHTML = '';
+  document.getElementById('moduleList').innerHTML = '';
+  modules.forEach((m, idx) => {
+    const def = MODULE_TYPES[m.type];
+    if (!def) return;
+    const item = document.createElement('div');
+    item.className = 'module-item';
+    item.draggable = true;
+    item.dataset.id = m.id;
+    item.innerHTML = `<span class="mi-icon">${def.icon}</span><span class="mi-name">${def.name}</span><div class="mi-toggle ${m.visible ? 'on' : ''}" onclick="toggleModule(${m.id})"></div><span class="mi-del" onclick="removeModule(${m.id})">✕</span>`;
+    item.addEventListener('dragstart', e => { e.dataTransfer.setData('text/plain', m.id); item.classList.add('dragging'); });
+    item.addEventListener('dragend', () => item.classList.remove('dragging'));
+    document.getElementById('moduleList').appendChild(item);
+    if (!m.visible) return;
+    const el = document.createElement('div');
+    el.className = 'module-slot';
+    el.dataset.id = m.id;
+    el.style.cssText = `left:${m.left}px;top:${m.top}px;width:${m.w}px;height:${m.h}px;pointer-events:auto;`;
+    el.innerHTML = `<div class="ms-handle"><span class="handle-dots">⠿</span>${def.name}</div><div class="ms-body" id="body-${m.id}"></div>${m.type !== 'search_box' ? '<div class="ms-resize"></div>' : ''}<div class="ms-del" onclick="removeModule(${m.id})">✕</div>`;
+    container.appendChild(el);
+    loadModuleContent(m, el);
+  });
+  const list = document.getElementById('moduleList');
+  list.addEventListener('dragover', e => { e.preventDefault(); const after = getDragAfterElement(list, e.clientY); const dragging = list.querySelector('.dragging'); if (dragging) { if (after == null) list.appendChild(dragging); else list.insertBefore(dragging, after); } });
+  list.addEventListener('drop', e => { e.preventDefault(); const ids = [...list.querySelectorAll('.module-item')].map(el => parseInt(el.dataset.id)); modules.sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id)); renderModules(); saveLayout(); });
+}
+
+function getDragAfterElement(list, y) {
+  const elements = [...list.querySelectorAll('.module-item:not(.dragging)')];
+  return elements.reduce((closest, child) => { const box = child.getBoundingClientRect(); const offset = y - box.top - box.height / 2; if (offset < 0 && offset > closest.offset) return { offset, element: child }; return closest; }, { offset: Number.NEGATIVE_INFINITY }).element;
+}
+
+function setupInteract() {
+  interact('.module-slot').draggable({ allowFrom: '.ms-handle', inertia: true, modifiers: [interact.modifiers.restrictRect({ restriction: '#phoneFrame', endOnly: true })], listeners: { move(event) { const el = event.target; const id = parseInt(el.dataset.id); const m = modules.find(m => m.id === id); if (m) { m.top = Math.max(0, event.rect.top); m.left = Math.max(0, Math.min(event.rect.left, 375 - m.w)); } }, end() { saveLayout(); } } }).resizable({ allowFrom: '.ms-resize', edges: { top: false, left: false, right: true, bottom: true }, modifiers: [interact.modifiers.restrictSize({ min: { width: 60, height: 40 }, max: { width: 375, height: 500 } })], listeners: { move(event) { const el = event.target; const id = parseInt(el.dataset.id); const m = modules.find(m => m.id === id); if (m) { m.w = Math.max(60, event.rect.width); m.h = Math.max(40, event.rect.height); el.style.width = m.w + 'px'; el.style.height = m.h + 'px'; } }, end() { saveLayout(); } } });
+}
+
+async function loadModuleContent(m, el) {
+  const body = document.getElementById(`body-${m.id}`);
+  if (!body || !m.visible) return;
+  try {
+    switch(m.type) {
+      case 'search_box': body.innerHTML = buildSearchBoxHTML(m); break;
+      case 'result_list': await buildResultList(m, body); break;
+      case 'hot_keywords': await buildHotKeywords(m, body); break;
+      case 'ads': await buildAds(m, body); break;
+      case 'wallet': await buildWallet(m, body); break;
+      case 'stats': await buildStats(m, body); break;
+      case 'quick_actions': body.innerHTML = buildQuickActionsHTML(); break;
+      case 'custom_html': body.innerHTML = m.customHtml || '<span style="color:#64748b;">自定义内容</span>'; break;
+    }
+  } catch(e) { body.innerHTML = '<span style="color:#ef4444;">加载失败</span>'; }
+}
+
+function buildSearchBoxHTML(m) {
+  return `<div class="demo-search-box"><input type="text" placeholder="搜索关键词..." id="demo-search-${m.id}" onkeydown="if(event.key==='Enter')demoSearch(${m.id})"><button onclick="demoSearch(${m.id})">搜索</button></div><div id="demo-search-result-${m.id}" style="color:#64748b;font-size:10px;">输入关键词按回车搜索</div>`;
+}
+
+async function demoSearch(moduleId) {
+  const input = document.getElementById(`demo-search-${moduleId}`);
+  const resultEl = document.getElementById(`demo-search-result-${moduleId}`);
+  if (!input || !resultEl) return;
+  const q = input.value.trim();
+  if (!q) { toast('请输入搜索关键词', 'err'); return; }
+  resultEl.innerHTML = '<span class="spinner"></span> 搜索中...';
+  try {
+    const resp = await fetch('/api/bot/command', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ command: q, tg_user_id: currentUser.id }) });
+    const data = await resp.json();
+    if (data.reply_html) { const temp = document.createElement('div'); temp.innerHTML = data.reply_html; const text = temp.textContent.substring(0, 200); resultEl.innerHTML = `<div style="color:#10b981;font-size:10px;">✅ 已发送到Bot: "${q}"</div><div style="color:#94a3b8;font-size:9px;margin-top:2px;">${text}</div>`; }
+    else { resultEl.innerHTML = '<span style="color:#ef4444;font-size:10px;">搜索失败</span>'; }
+  } catch(e) { resultEl.innerHTML = '<span style="color:#ef4444;font-size:10px;">网络错误</span>'; }
+}
+
+async function buildResultList(m, body) {
+  body.innerHTML = '<span class="spinner"></span> 加载中...';
+  try {
+    const resp = await fetch('/api/bot/command', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ command: '空投', tg_user_id: currentUser.id }) });
+    const data = await resp.json();
+    if (data.reply_html) { const temp = document.createElement('div'); temp.innerHTML = data.reply_html; const text = temp.textContent.substring(0, 300); body.innerHTML = `<div style="color:#2AABEE;font-weight:600;margin-bottom:4px;">🔍 搜索结果: "空投"</div><div style="color:#e2e8f0;font-size:10px;line-height:1.5;">${text}</div><div style="color:#64748b;font-size:9px;margin-top:4px;">共 ${data.result_count || data.results?.length || 0} 条结果</div>`; }
+    else { body.innerHTML = '<span style="color:#64748b;">暂无搜索结果</span>'; }
+  } catch(e) { body.innerHTML = '<span style="color:#ef4444;">加载失败</span>'; }
+}
+
+async function buildHotKeywords(m, body) {
+  body.innerHTML = '<span class="spinner"></span> 加载中...';
+  try {
+    const resp = await fetch('/api/demo/hot_keywords');
+    const data = await resp.json();
+    if (data.ok && data.categories) {
+      let html = '<div style="color:#f59e0b;font-weight:600;margin-bottom:4px;">⭐ 热门搜索</div>';
+      for (const [cat, catData] of Object.entries(data.categories)) {
+        const kws = catData.keywords || [];
+        html += `<div class="hot-kw-row"><span class="hot-kw-label">${cat}:</span><div class="hot-kw-chips">${kws.slice(0, 5).map(kw => `<span class="hot-kw-chip" onclick="hotKwSearch('${kw.replace(/'/g,"\\'")}')">${kw}</span>`).join('')}</div></div>`;
+      }
+      body.innerHTML = html;
+    } else { body.innerHTML = '<span style="color:#64748b;">暂无热词数据</span>'; }
+  } catch(e) { body.innerHTML = '<span style="color:#ef4444;">加载失败</span>'; }
+}
+
+async function buildAds(m, body) {
+  body.innerHTML = '<span class="spinner"></span> 加载中...';
+  try {
+    const resp = await fetch('/api/bot/command', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ command: '/start', tg_user_id: currentUser.id }) });
+    const data = await resp.json();
+    if (data.reply_html) {
+      const temp = document.createElement('div'); temp.innerHTML = data.reply_html;
+      const text = temp.textContent;
+      const adMatches = text.matchAll(/📣\s*([^\n]+)/g);
+      let adsHtml = '<div style="color:#f59e0b;font-weight:600;margin-bottom:4px;">📣 推荐频道</div>';
+      let count = 0;
+      for (const match of adMatches) { if (count >= 3) break; const title = match[1].trim().substring(0, 30); adsHtml += `<div class="ad-row"><span class="ad-title">${title}</span><span class="ad-action" onclick="openChannel('${title.replace(/'/g,"\\'")}')">加入</span></div>`; count++; }
+      if (count === 0) adsHtml += '<div style="color:#64748b;font-size:10px;">暂无推荐频道，请先在管理后台添加广告</div>';
+      body.innerHTML = adsHtml;
+    } else { body.innerHTML = '<span style="color:#64748b;">暂无广告数据</span>'; }
+  } catch(e) { body.innerHTML = '<span style="color:#ef4444;">加载失败</span>'; }
+}
+
+async function buildWallet(m, body) {
+  body.innerHTML = '<span class="spinner"></span> 加载中...';
+  try {
+    const resp = await fetch('/api/bot/command', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ command: '/wallet', tg_user_id: currentUser.id }) });
+    const data = await resp.json();
+    if (data.reply_html) { const temp = document.createElement('div'); temp.innerHTML = data.reply_html; const text = temp.textContent; const balMatch = text.match(/\$\d+\.?\d*/); const balance = balMatch ? balMatch[0] : '$0.00'; body.innerHTML = `<div style="color:#f59e0b;font-weight:600;margin-bottom:4px;">💰 钱包余额</div><div style="font-size:20px;font-weight:700;color:#fbbf24;">${balance}</div><div style="color:#94a3b8;font-size:9px;margin-top:2px;">USDT (TRC20)</div><div class="btn-group" style="margin-top:6px;"><button class="action-btn" onclick="sendCommand('/wallet')">查看详情</button><button class="action-btn" onclick="sendCommand('/recharge')">充值</button></div>`; }
+    else { body.innerHTML = '<span style="color:#64748b;">暂无数据</span>'; }
+  } catch(e) { body.innerHTML = '<span style="color:#ef4444;">加载失败</span>'; }
+}
+
+async function buildStats(m, body) {
+  body.innerHTML = '<span class="spinner"></span> 加载中...';
+  try {
+    const resp = await fetch('/api/bot/command', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ command: '/stats', tg_user_id: currentUser.id }) });
+    const data = await resp.json();
+    if (data.reply_html) { const temp = document.createElement('div'); temp.innerHTML = data.reply_html; const text = temp.textContent; const balMatch = text.match(/\$\d+\.?\d*/); const balance = balMatch ? balMatch[0] : '$0.00'; const limitMatch = text.match(/剩余：\s*(\d+)/); const remaining = limitMatch ? limitMatch[1] : '0'; body.innerHTML = `<div style="color:#f59e0b;font-weight:600;margin-bottom:4px;">📊 账户统计</div><div class="stat-grid"><div class="stat-cell"><div class="stat-num">${balance}</div><div class="stat-label">钱包余额</div></div><div class="stat-cell"><div class="stat-num" style="color:#10b981;">${remaining}</div><div class="stat-label">今日剩余</div></div></div><div class="btn-group" style="margin-top:6px;"><button class="action-btn" onclick="sendCommand('/stats')">刷新</button><button class="action-btn" onclick="sendCommand('/wallet')">钱包</button></div>`; }
+    else { body.innerHTML = '<span style="color:#64748b;">暂无数据</span>'; }
+  } catch(e) { body.innerHTML = '<span style="color:#ef4444;">加载失败</span>'; }
+}
+
+function buildQuickActionsHTML() {
+  return `<div style="color:#2AABEE;font-weight:600;margin-bottom:4px;">⚡ 快捷操作</div><div class="tg-keyboard"><div class="tg-kb-btn" onclick="sendCommand('/start')">🏠 首页</div><div class="tg-kb-btn" onclick="sendCommand('/stats')">📊 统计</div><div class="tg-kb-btn" onclick="sendCommand('/wallet')">💰 钱包</div><div class="tg-kb-btn" onclick="sendCommand('/recharge')">💵 充值</div><div class="tg-kb-btn" onclick="sendCommand('/channels')">📺 频道</div><div class="tg-kb-btn" onclick="sendCommand('/help')">❓ 帮助</div></div>`;
+}
+
+function hotKwSearch(kw) { sendCommand(kw); }
+function openChannel(name) { toast(`正在打开频道: ${name}`, 'info'); sendCommand(name); }
+
+function sendCommand(cmd) {
+  if (!cmd || !cmd.trim()) return;
+  const chat = document.getElementById('phoneChat');
+  const userMsg = document.createElement('div'); userMsg.className = 'msg msg-user msg-fade'; userMsg.textContent = cmd; chat.appendChild(userMsg);
+  const loadingMsg = document.createElement('div'); loadingMsg.className = 'msg msg-bot msg-fade'; loadingMsg.innerHTML = '<span class="spinner"></span>'; chat.appendChild(loadingMsg);
+  chat.scrollTop = chat.scrollHeight;
+  fetch('/api/bot/command', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ command: cmd, tg_user_id: currentUser.id }) })
+    .then(r => r.json())
+    .then(data => {
+      loadingMsg.remove();
+      if (data.reply_html) {
+        const botMsg = document.createElement('div'); botMsg.className = 'msg msg-bot msg-fade'; botMsg.innerHTML = data.reply_html; chat.appendChild(botMsg);
+        if (data.actions && data.actions.length > 0) {
+          const kbDiv = document.createElement('div'); kbDiv.className = 'tg-keyboard'; kbDiv.style.marginTop = '4px';
+          data.actions.slice(0, 4).forEach(a => { const btn = document.createElement('div'); btn.className = 'tg-kb-btn'; btn.textContent = a.text; btn.onclick = () => sendCommand(a.cmd || a.text); kbDiv.appendChild(btn); });
+          chat.appendChild(kbDiv);
+        }
+      } else { loadingMsg.textContent = '⚠️ 暂无响应'; loadingMsg.style.color = '#ef4444'; }
+      chat.scrollTop = chat.scrollHeight;
+    })
+    .catch(e => { loadingMsg.remove(); const errMsg = document.createElement('div'); errMsg.className = 'msg msg-bot'; errMsg.style.color = '#ef4444'; errMsg.textContent = '❌ 网络错误，请检查服务是否运行'; chat.appendChild(errMsg); chat.scrollTop = chat.scrollHeight; });
+}
+
+function previewStart() { sendCommand('/start'); }
+function previewSearch(keyword) { if (keyword) sendCommand(keyword); else toast('请输入搜索关键词', 'err'); }
+
+async function refreshAllModules() {
+  toast('正在刷新所有模块...', 'info');
+  modules.forEach(m => { if (!m.visible) return; const el = document.querySelector(`.module-slot[data-id="${m.id}"]`); if (el) loadModuleContent(m, el); });
+}
+
+async function pushToBot() {
+  const btn = document.getElementById('pushBtn');
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> 推送中...';
+  const layoutSnapshot = { modules: modules.map(m => ({ type: m.type, top: m.top, left: m.left, w: m.w, h: m.h, visible: m.visible })), columns: layoutColumns, user_id: currentUser.id, timestamp: new Date().toISOString() };
+  try {
+    const resp = await fetch('/api/bot/push_demo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ layout: layoutSnapshot }) });
+    const data = await resp.json();
+    const resultEl = document.getElementById('pushResult');
+    const statusEl = document.getElementById('pushStatus');
+    if (data.ok) { statusEl.innerHTML = '<span style="color:#10b981;">✅ 推送成功！</span>'; resultEl.innerHTML = data.results?.map(r => `<div style="margin-bottom:4px;">${r}</div>`).join('') || '已成功推送'; addPushLog('✅ 推送成功', data); toast('推送到Bot成功！请查看Telegram消息', 'ok'); }
+    else { statusEl.innerHTML = '<span style="color:#ef4444;">❌ 推送失败</span>'; resultEl.innerHTML = `<div style="color:#ef4444;">${data.error || '未知错误'}</div>`; addPushLog('❌ 推送失败', data); toast('推送失败，请检查配置', 'err'); }
+  } catch(e) { document.getElementById('pushStatus').innerHTML = '<span style="color:#ef4444;">❌ 网络错误</span>'; document.getElementById('pushResult').innerHTML = `<div style="color:#ef4444;">${e.message}</div>`; addPushLog('❌ 网络错误', e); toast('网络错误，请检查服务', 'err'); }
+  finally { btn.disabled = false; btn.innerHTML = '🚀 一键推送到Bot'; document.getElementById('pushModal').style.display = 'flex'; }
+}
+
+function closePushModal() { document.getElementById('pushModal').style.display = 'none'; }
+
+function addPushLog(type, data) {
+  const log = document.getElementById('pushLog');
+  const time = new Date().toLocaleTimeString();
+  const div = document.createElement('div');
+  div.style.cssText = 'padding:4px 0;border-bottom:1px solid #334155;font-size:10px;';
+  div.innerHTML = `<div style="color:#94a3b8;">${time} ${type}</div>${data.html_length ? `<div style="color:#64748b;">内容长度: ${data.html_length} 字符</div>` : ''}`;
+  if (log.querySelector('div[style*="italic"]')) log.innerHTML = '';
+  log.insertBefore(div, log.firstChild);
+}
+
+function toast(msg, type = 'info') { const existing = document.querySelector('.toast'); if (existing) existing.remove(); const t = document.createElement('div'); t.className = `toast ${type}`; t.textContent = msg; document.body.appendChild(t); setTimeout(() => t.remove(), 3000); }
+</script>
+</body>
+</html>
