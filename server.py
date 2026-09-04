@@ -34,6 +34,7 @@ try:
     from fastapi import FastAPI, Request
     from fastapi.responses import HTMLResponse, JSONResponse
     from fastapi.staticfiles import StaticFiles
+    from fastapi.middleware.cors import CORSMiddleware
     import uvicorn
 except ImportError:
     print("[生产环境] 首次启动安装依赖...")
@@ -41,6 +42,7 @@ except ImportError:
     from fastapi import FastAPI, Request
     from fastapi.responses import HTMLResponse, JSONResponse
     from fastapi.staticfiles import StaticFiles
+    from fastapi.middleware.cors import CORSMiddleware
     import uvicorn
 
 # 项目模块导入
