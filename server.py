@@ -6945,7 +6945,8 @@ async def get_demo_config():
     """获取演示布局配置（从系统设置表读取）"""
     try:
         from app.admin.system_settings_manager import load_all_settings_from_db
-        settings = await load_all_settings_from_db()
+        async with get_db() as db:
+            settings = await load_all_settings_from_db(db)
         layout = settings.get("demo_layout")
         if layout:
             try:
@@ -6969,7 +6970,8 @@ async def update_demo_config(request: Request):
     layout = p.get("layout", {})
     try:
         layout_json = _json.dumps(layout, ensure_ascii=False)
-        await upsert_setting("demo_layout", layout_json)
+        async with get_db() as db:
+            await upsert_setting(db, "demo_layout", layout_json)
         return JSONResponse({"ok": True, "message": "布局已保存"})
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)[:200]})
