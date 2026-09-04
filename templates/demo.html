@@ -273,6 +273,18 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 });
 
+async function loadLayoutFromServer() {
+  try {
+    const resp = await fetch('/api/demo/config');
+    const data = await resp.json();
+    if (data.ok && data.layout && data.layout.modules && data.layout.modules.length > 0) {
+      modules = data.layout.modules;
+      layoutColumns = data.layout.columns || 1;
+      moduleCounter = modules.length;
+    }
+  } catch (e) { console.log('加载布局失败，使用默认布局', e); }
+}
+
 function updateUserLabel() { document.getElementById('currentUserLabel').textContent = currentUser.name; }
 
 function loadLayout() {
