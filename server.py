@@ -7239,66 +7239,78 @@ async def update_demo_config(request: Request):
 async def push_demo_to_bot(request: Request):
     """一键推送到Bot：将演示布局配置序列化后推送至管理员Telegram"""
     try:
+        raw = await request.body()
+        if not raw:
+            return JSONResponse({"ok": False, "error": "请求体为空"}, status_code=400)
         p = await request.json()
-    except Exception:
-        return JSONResponse({"ok": False, "error": "格式错误"}, status_code=400)
-    token = Config.BOT_TOKEN
-    if not token:
-        return JSONResponse({"ok": False, "error": "TG_BOT_TOKEN 未配置"}, status_code=400)
-    admins = Config.ADMIN_TG_IDS or []
-    if not admins:
-        return JSONResponse({"ok": False, "error": "ADMIN_TG_IDS 未配置"}, status_code=400)
-    import httpx as _hx
-    layout = p.get("layout", {})
-    modules = layout.get("modules", [])
-    columns = layout.get("columns", 1)
-    user_id = layout.get("user_id", 10000001)
-    # 构建推送内容摘要
-    module_names = []
-    for m in modules:
-        t = m.get("type", "")
-        name_map = {
-            "search_box": "🔍 搜索框", "result_list": "📋 搜索结果",
-            "hot_keywords": "⭐ 热门搜索", "ads": "📣 广告卡片",
-            "wallet": "💰 钱包余额", "stats": "📊 数据统计",
-            "quick_actions": "⚡ 快捷操作", "custom_html": "📝 自定义HTML",
-        }
-        module_names.append(name_map.get(t, t))
-    layout_summary = f"📱 <b>TG搜索机器人 · 演示布局</b>\n\n"
-    layout_summary += f"布局格式：{columns} 列\n"
-    layout_summary += f"演示用户：TG {user_id}\n"
-    layout_summary += f"模块数量：{len(modules)} 个\n\n"
-    layout_summary += "📦 模块列表：\n"
-    for i, name in enumerate(module_names, 1):
-        layout_summary += f"  {i}. {name}\n"
-    layout_summary += "\n💡 提示：请在Bot端输入 /start 查看完整首页效果"
-    results_list = []
-    ok_count = 0
-    try:
-        async with _hx.AsyncClient(timeout=_hx.Timeout(15.0, connect=8.0)) as client:
-            for uid in admins:
-                try:
-                    r = await client.post(
-                        f"https://api.telegram.org/bot{token}/sendMessage",
-                        json={"chat_id": int(uid), "text": layout_summary, "parse_mode": "HTML"},
-                    )
-                    data = r.json()
-                    if data.get("ok"):
-                        ok_count += 1
-                        results_list.append(f"✅ 推送至管理员 {uid} 成功")
-                    else:
-                        results_list.append(f"⚠️ 推送至 {uid} 失败：{data.get('description','')}")
-                except Exception as e:
-                    results_list.append(f"❌ 推送至 {uid} 异常：{str(e)[:60]}")
+        if not isinstance(p, dict):
+            return JSONResponse({"ok": False, "error": "格式错误：期望 JSON 对象"}, status_code=400)
+        token = Config.BOT_TOKEN
+        if not token:
+            return JSONResponse({"ok": False, "error": "TG_BOT_TOKEN 未配置"}, status_code=400)
+        admins = Config.ADMIN_TG_IDS or []
+        if not admins:
+            return JSONResponse({"ok": False, "error": "ADMIN_TG_IDS 未配置"}, status_code=400)
+        import httpx as _hx
+        layout = p.get("layout", {})
+        if not isinstance(layout, dict):
+            layout = {}
+        modules = layout.get("modules", [])
+        if not isinstance(modules, list):
+            modules = []
+        columns = layout.get("columns", 1)
+        user_id = layout.get("user_id", 10000001)
+        # 构建推送内容摘要
+        module_names = []
+        for m in modules:
+            if not isinstance(m, dict):
+                continue
+            t = m.get("type", "")
+            name_map = {
+                "search_box": "🔍 搜索框", "result_list": "📋 搜索结果",
+                "hot_keywords": "⭐ 热门搜索", "ads": "📣 广告卡片",
+                "wallet": "💰 钱包余额", "stats": "📊 数据统计",
+                "quick_actions": "⚡ 快捷操作", "custom_html": "📝 自定义HTML",
+            }
+            module_names.append(name_map.get(t, t))
+        layout_summary = f"📱 <b>TG搜索机器人 · 演示布局</b>\n\n"
+        layout_summary += f"布局格式：{columns} 列\n"
+        layout_summary += f"演示用户：TG {user_id}\n"
+        layout_summary += f"模块数量：{len(modules)} 个\n\n"
+        layout_summary += "📦 模块列表：\n"
+        for i, name in enumerate(module_names, 1):
+            layout_summary += f"  {i}. {name}\n"
+        layout_summary += "\n💡 提示：请在Bot端输入 /start 查看完整首页效果"
+        results_list = []
+        ok_count = 0
+        try:
+            async with _hx.AsyncClient(timeout=_hx.Timeout(15.0, connect=8.0)) as client:
+                for uid in admins:
+                    try:
+                        r = await client.post(
+                            f"https://api.telegram.org/bot{token}/sendMessage",
+                            json={"chat_id": int(uid), "text": layout_summary, "parse_mode": "HTML"},
+                        )
+                        data = r.json()
+                        if data.get("ok"):
+                            ok_count += 1
+                            results_list.append(f"✅ 推送至管理员 {uid} 成功")
+                        else:
+                            results_list.append(f"⚠️ 推送至 {uid} 失败：{data.get('description','')}")
+                    except Exception as e:
+                        results_list.append(f"❌ 推送至 {uid} 异常：{str(e)[:60]}")
+        except Exception as e:
+            return JSONResponse({"ok": False, "error": f"HTTP 请求失败：{str(e)[:100]}"}, status_code=500)
+        return JSONResponse({
+            "ok": ok_count > 0,
+            "sent_count": ok_count,
+            "results": results_list,
+            "module_count": len(modules),
+            "columns": columns,
+        })
     except Exception as e:
-        return JSONResponse({"ok": False, "error": f"HTTP 请求失败：{str(e)[:100]}"}, status_code=500)
-    return JSONResponse({
-        "ok": ok_count > 0,
-        "sent_count": ok_count,
-        "results": results_list,
-        "module_count": len(modules),
-        "columns": columns,
-    })
+        logger.warning(f"push_demo_to_bot 异常: {str(e)[:200]}")
+        return JSONResponse({"ok": False, "error": f"服务器内部错误：{str(e)[:100]}"}, status_code=500)
 
 
 if __name__ == "__main__":
