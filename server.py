@@ -5850,6 +5850,11 @@ async def api_bot_command(request: Request):
                 featured_ads = [dict(row) for row in await cur.fetchall()]
             hot_keywords_by_cat = await ad_manager.get_hot_keywords_by_category()
             reply_html, actions = await _build_start_html(u, balance, featured_ads, hot_keywords_by_cat)
+            hot_keywords = []
+            if hot_keywords_by_cat:
+                for cat_name, cat_data in hot_keywords_by_cat.items():
+                    for kw in cat_data.get("keywords", []):
+                        hot_keywords.append({"keyword": kw.get("keyword", ""), "category": cat_name})
 
         elif cmd == "/help":
             reply_html = """📖 <b>命令总览</b><br>
@@ -6316,6 +6321,7 @@ async def api_bot_command(request: Request):
             "reply_html": reply_html,
             "actions": actions,
             "recharge_action": recharge_action,
+            "hot_keywords": hot_keywords,
         })
 
     # 2. 非命令 = 关键词搜索

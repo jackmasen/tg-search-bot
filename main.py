@@ -6,7 +6,7 @@ import asyncio
 import sys
 import os
 from loguru import logger
-from telegram.ext import Application, CommandHandler, MessageHandler, filters
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 
 from app.config import Config
 from app.database import init_db
@@ -28,6 +28,7 @@ from app.bot.handlers import (
     ad_stats_command,
     ai_search_command,
     ai_command,
+    kw_callback_handler,
 )
 
 
@@ -47,8 +48,19 @@ async def _load_config_from_db():
 
 # 日志配置
 def setup_logging():
-    """配置loguru日志"""
     logger.remove()
+    logger.add(
+        sys.stderr,
+        level=Config.LOG_LEVEL,
+        format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level:<8}</level> | <cyan>{name}</cyan> - {message}",
+    )
+    logger.add(
+        f"{Config.LOG_DIR}/bot_{{time}}.log",
+        rotation="10 MB",
+        retention="30 days",
+        level=Config.LOG_LEVEL,
+        encoding="utf-8",
+    )
     logger.add(
         sys.stderr,
         level=Config.LOG_LEVEL,
@@ -120,11 +132,14 @@ def main():
     application.add_handler(CommandHandler("aisearch", ai_search_command))
     application.add_handler(CommandHandler("ai", ai_command))
 
+    # 注册回调查询处理
+    application.add_handler(CallbackQueryHandler(kw_callback_handler))
+
     # 注册文本搜索（非命令消息）
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search_handler))
 
     # 启动Bot（polling模式）
-    application.run_polling(allowed_updates=["message"])
+    application.run_polling(allowed_updates=["message", "callback_query"])
 
 
 if __name__ == "__main__":

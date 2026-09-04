@@ -92,13 +92,25 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     api_data = await _call_bot_api("/start", user.id)
     reply_html = api_data.get("reply_html", "")
     actions = api_data.get("actions", [])
+    hot_keywords = api_data.get("hot_keywords", [])
 
-    reply_md = _html_to_markdown(reply_html)
-    if not reply_md:
-        reply_md = "👋 欢迎使用 TG搜索Pro Bot！\n\n请直接发送关键词搜索或点击下方按钮操作。"
+    if not reply_html:
+        reply_html = "👋 欢迎使用 TG搜索Pro Bot！请直接发送关键词搜索或点击下方按钮操作。"
+
+    kw_buttons = []
+    for kw in hot_keywords[:8]:
+        kw_text = kw.get("keyword", "")
+        if kw_text:
+            kw_buttons.append([InlineKeyboardButton(f"🔍 {kw_text}", callback_data=f"__kw__{kw_text}")])
 
     keyboard = _actions_to_keyboard(actions)
-    await update.message.reply_text(reply_md, parse_mode="Markdown", reply_markup=keyboard)
+    if kw_buttons:
+        if keyboard:
+            keyboard.inline_keyboard.extend(kw_buttons)
+        else:
+            keyboard = InlineKeyboardMarkup(kw_buttons)
+
+    await update.message.reply_text(reply_html, parse_mode="HTML", reply_markup=keyboard)
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -448,6 +460,57 @@ async def search_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     keyboard = _actions_to_keyboard(actions)
     await update.message.reply_text(reply_md, parse_mode="Markdown", reply_markup=keyboard)
+
+
+async def kw_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """处理热搜词按钮点击 — 触发搜索"""
+    cb = update.callback_query
+    await cb.answer()
+    data = cb.data or ""
+    if not data.startswith("__kw__"):
+        return
+    keyword = data[len("__kw__"):]
+    user_id = cb.from_user.id
+
+    today = date.today()
+    user_stat = _user_search_count.get(user_id, {"count": 0, "date": today})
+    if user_stat["date"] != today:
+        user_stat = {"count": 0, "date": today}
+
+    if user_stat["count"] >= Config.FREE_SEARCH_DAILY_LIMIT:
+        await cb.edit_message_text(
+            f"⚠️ 今日免费搜索已用完（{Config.FREE_SEARCH_DAILY_LIMIT}次）\n明日重置或开通VIP"
+        )
+        return
+
+    await cb.edit_message_text(f"🔍 正在搜索 '{keyword}'...")
+
+    api_data = await _call_bot_api(keyword, user_id)
+    reply_html = api_data.get("reply_html", "")
+    actions = api_data.get("actions", [])
+    search_results = api_data.get("search_results", [])
+    ai_expanded_keywords = api_data.get("ai_expanded_keywords", [])
+
+    user_stat["count"] += 1
+    _user_search_count[user_id] = user_stat
+
+    if not reply_html:
+        await cb.edit_message_text(f"❌ 未找到 '{keyword}' 相关内容（试试：比特币/AI/空投/Python）")
+        return
+
+    reply_md = _html_to_markdown(reply_html)
+    if not reply_md:
+        reply_md = f"🔍 搜索 '{keyword}' 无结果"
+
+    remaining = Config.FREE_SEARCH_DAILY_LIMIT - user_stat["count"]
+    if remaining > 0:
+        reply_md += f"\n\n💡 剩余搜索：{remaining}/{Config.FREE_SEARCH_DAILY_LIMIT}"
+    elif ai_expanded_keywords:
+        kw_hint = " ".join(f"`{kw}`" for kw in ai_expanded_keywords[:4])
+        reply_md += f"\n\n💡 相关搜索：{kw_hint}"
+
+    keyboard = _actions_to_keyboard(actions)
+    await cb.edit_message_text(reply_md, parse_mode="Markdown", reply_markup=keyboard)
 
 
 # ============ AI 智能搜索 ============
