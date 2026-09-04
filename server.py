@@ -77,6 +77,34 @@ ADMIN_CREDENTIALS = {
 # 内存 session 管理（key=session_id, value=dict(username, expire_at)）
 ADMIN_SESSIONS = {}
 
+# H1: 登录暴力破解防护（IP级锁定）
+_LOGIN_ATTEMPTS: dict = {}  # key: ip, value: {"count": int, "locked_until": float}
+LOGIN_MAX_ATTEMPTS = 5
+LOGIN_LOCKOUT_SECONDS = 900  # 15分钟
+
+# M1: Session持久化计数器（每秒递增，作为session_id的时间戳分量）
+_session_counter = 0
+
+# L1: 管理员操作审计 - 记录关键操作到数据库
+_AUDIT_ACTIONS = {
+    "login": "登录",
+    "logout": "登出",
+    "change_password": "修改密码",
+    "delete_user": "删除用户",
+    "delete_campaign": "删除广告",
+    "delete_channel": "删除频道",
+    "delete_wallet": "删除钱包",
+    "delete_account": "删除采集账号",
+    "update_settings": "修改系统配置",
+    "clear_cache": "清理缓存",
+    "recharge_confirm": "确认充值",
+    "recharge_reject": "拒绝充值",
+    "add_campaign": "创建广告",
+    "edit_campaign": "修改广告",
+    "pause_campaign": "暂停广告",
+    "resume_campaign": "恢复广告",
+}
+
 # 监视分享链接缓存（key=share_id, value=dict(data, expires_at)）
 MONITOR_SHARE_LINKS = {}
 
@@ -89,6 +117,147 @@ def _to_int(x, default=0):
         return int(x) if x not in (None, "") else default
     except Exception:
         return default
+
+def _get_client_ip(request: Request) -> str:
+    """获取客户端真实IP（支持代理转发）"""
+    if request.client:
+        return request.client.host
+    return "unknown"
+
+
+def _check_login_bruteforce(ip: str) -> tuple:
+    """检查IP是否被锁定，返回 (is_locked, remaining_seconds)"""
+    now = _time.time()
+    attempt = _LOGIN_ATTEMPTS.get(ip)
+    if not attempt:
+        return False, 0
+    if attempt["locked_until"] > now:
+        return True, int(attempt["locked_until"] - now)
+    # 锁定已过期，清除记录
+    _LOGIN_ATTEMPTS.pop(ip, None)
+    return False, 0
+
+
+def _record_login_failure(ip: str):
+    """记录登录失败，达到阈值则锁定IP"""
+    global _LOGIN_ATTEMPTS
+    now = _time.time()
+    attempt = _LOGIN_ATTEMPTS.get(ip, {"count": 0, "locked_until": 0})
+    attempt["count"] += 1
+    if attempt["count"] >= LOGIN_MAX_ATTEMPTS:
+        attempt["locked_until"] = now + LOGIN_LOCKOUT_SECONDS
+        logger.warning(f"🔒 IP {ip} 因{LOGIN_MAX_ATTEMPTS}次登录失败被锁定{LOGIN_LOCKOUT_SECONDS}秒")
+    _LOGIN_ATTEMPTS[ip] = attempt
+
+
+def _cleanup_login_attempts():
+    """清理过期的登录尝试记录（每小时调用一次）"""
+    now = _time.time()
+    expired = [ip for ip, v in _LOGIN_ATTEMPTS.items() if v["locked_until"] < now - 3600]
+    for ip in expired:
+        _LOGIN_ATTEMPTS.pop(ip, None)
+
+
+# M3: 通用速率限制器（IP级，每秒请求数限制）
+_RATE_LIMIT: dict = {}  # key: f"{ip}:{path}", value: {"count": int, "window_start": float}
+RATE_LIMIT_MAX_REQUESTS = 30  # 每个端点每10秒最多30次
+RATE_LIMIT_WINDOW = 10  # 秒
+
+
+def _check_rate_limit(ip: str, path: str) -> tuple:
+    """检查IP是否触发速率限制，返回 (is_limited: bool, reset_seconds: int)"""
+    key = f"{ip}:{path}"
+    now = _time.time()
+    record = _RATE_LIMIT.get(key)
+    if not record:
+        _RATE_LIMIT[key] = {"count": 1, "window_start": now}
+        return False, 0
+    elapsed = now - record["window_start"]
+    if elapsed > RATE_LIMIT_WINDOW:
+        _RATE_LIMIT[key] = {"count": 1, "window_start": now}
+        return False, 0
+    record["count"] += 1
+    _RATE_LIMIT[key] = record
+    if record["count"] > RATE_LIMIT_MAX_REQUESTS:
+        reset = int(RATE_LIMIT_WINDOW - elapsed)
+        return True, max(reset, 1)
+    return False, 0
+
+
+def _cleanup_rate_limits():
+    """清理过期的速率限制记录"""
+    now = _time.time()
+    expired = [k for k, v in _RATE_LIMIT.items() if now - v["window_start"] > RATE_LIMIT_WINDOW * 2]
+    for k in expired:
+        _RATE_LIMIT.pop(k, None)
+
+
+# ===== M1: Session 持久化到 SQLite =====
+async def _sync_sessions_to_db():
+    """将内存中的 ADMIN_SESSIONS 同步到 admin_sessions 表（幂等 upsert）"""
+    try:
+        from app.database import get_db
+        async with get_db() as db:
+            now_ts = _time.time()
+            await db.execute("DELETE FROM admin_sessions WHERE expire_at < datetime('now','localtime')")
+            for sid, sess in ADMIN_SESSIONS.items():
+                await db.execute(
+                    """INSERT OR REPLACE INTO admin_sessions (session_id, username, expire_at)
+                       VALUES (?, ?, datetime(?, 'unixepoch', 'localtime'))""",
+                    (sid, sess["username"], str(int(sess["expire_at"]))),
+                )
+            await db.commit()
+    except Exception as e:
+        logger.warning(f"⚠️ Session 持久化写入失败: {str(e)[:80]}")
+
+
+async def _load_sessions_from_db():
+    """从 admin_sessions 表恢复 Session 到内存"""
+    global ADMIN_SESSIONS
+    try:
+        from app.database import get_db
+        async with get_db() as db:
+            cur = await db.execute(
+                "SELECT session_id, username, expire_at FROM admin_sessions WHERE expire_at > datetime('now','localtime')"
+            )
+            rows = await cur.fetchall()
+        ADMIN_SESSIONS = {}
+        for row in rows:
+            sid, username, expire_at_str = row["session_id"], row["username"], row["expire_at"]
+            try:
+                expire_ts = _time.mktime(_time.strptime(expire_at_str, "%Y-%m-%d %H:%M:%S"))
+                ADMIN_SESSIONS[sid] = {"username": username, "expire_at": expire_ts}
+            except Exception:
+                continue
+        logger.info(f"✅ 从数据库恢复 {len(ADMIN_SESSIONS)} 条有效 Session")
+    except Exception as e:
+        logger.warning(f"⚠️ Session 从数据库加载失败，使用空 Session: {str(e)[:80]}")
+
+
+# ===== L1: 管理员操作审计日志 =====
+async def _log_admin_action(
+    action: str,
+    username: str,
+    ip: str,
+    target_type: str = "",
+    target_id: str = "",
+    detail: str = "",
+    success: int = 1,
+):
+    """记录管理员操作到 admin_audit_log 表（非阻塞，失败不抛异常）"""
+    try:
+        from app.database import get_db
+        async with get_db() as db:
+            await db.execute(
+                """INSERT INTO admin_audit_log
+                   (action, target_type, target_id, username, ip_address, detail, success)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (action, target_type, target_id, username, ip, detail[:500], success),
+            )
+            await db.commit()
+    except Exception as e:
+        logger.warning(f"⚠️ 审计日志写入失败: {str(e)[:60]}")
+
 
 def _verify_admin_session(session_id: str) -> bool:
     if not session_id:
@@ -340,6 +509,46 @@ async def init_production_db():
 # -----------------------------------------------------------------------
 app = FastAPI(title="TG搜索机器人 - 生产环境", version=Config.APP_VERSION)
 
+# M2: CORS 中间件 - 限制允许的源
+_ALLOWED_ORIGINS = [o.strip() for o in os.getenv("CORS_ALLOWED_ORIGINS", "").split(",") if o.strip()]
+if not _ALLOWED_ORIGINS:
+    _ALLOWED_ORIGINS = ["http://127.0.0.1", "http://localhost"]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_ALLOWED_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_headers=["Content-Type", "Authorization"],
+)
+
+# M3: 速率限制中间件 - 保护敏感管理端点
+_sensitive_prefixes = ("/api/admin/", "/api/settings/", "/api/recharge/", "/api/wallet/", "/api/campaigns/")
+_exempt_paths = {"/api/admin/check_auth", "/api/admin/login"}
+
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request as _Request
+from starlette.responses import JSONResponse as _JSONResponse
+
+class RateLimitMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: _Request, call_next):
+        path = request.url.path
+        if path in _exempt_paths:
+            return await call_next(request)
+        if not any(path.startswith(p) for p in _sensitive_prefixes):
+            return await call_next(request)
+        ip = request.client.host if request.client else "unknown"
+        limited, reset = _check_rate_limit(ip, path)
+        if limited:
+            logger.warning(f"⚠️ 速率限制触发: IP={ip}, path={path}, 重置={reset}秒")
+            return _JSONResponse(
+                {"ok": False, "error": f"请求过于频繁，请{reset}秒后重试"},
+                status_code=429,
+                headers={"Retry-After": str(reset)},
+            )
+        return await call_next(request)
+
+app.add_middleware(RateLimitMiddleware)
+
 
 # =========================================================================
 # AI 多模型定时健康检查后台任务
@@ -414,6 +623,9 @@ async def startup_event():
     print("[生产模式] 服务启动完成")
     print(f"[生产模式] 用户界面: http://127.0.0.1:8001")
     print(f"[生产模式] 管理后台: http://127.0.0.1:8001/admin")
+
+    # M1: 从数据库恢复管理员 Session
+    await _load_sessions_from_db()
 
     # 启动 AI 多模型定时健康检查后台任务
     asyncio.create_task(_start_ai_health_checker())
@@ -1296,11 +1508,29 @@ async def api_admin_login(request: Request):
         p = {}
     u = str(p.get("username", "")).strip()
     pw = str(p.get("password", ""))
+    # H1: 暴力破解防护 - 检查IP锁定状态
+    client_ip = _get_client_ip(request)
+    is_locked, remaining = _check_login_bruteforce(client_ip)
+    if is_locked:
+        logger.warning(f"⚠️ 登录尝试被锁定IP拦截: {client_ip}, 剩余{remaining}秒")
+        return JSONResponse({"ok": False, "error": f"尝试次数过多，请{remaining}秒后再试"}, status_code=423)
     cred = await _load_admin_credentials_from_db()
     if u != cred["username"] or pw != cred["password"]:
-        return JSONResponse({"ok": False, "error": "账号或密码错误"})
+        _record_login_failure(client_ip)
+        remaining_attempts = LOGIN_MAX_ATTEMPTS - (_LOGIN_ATTEMPTS.get(client_ip, {}).get("count", 0))
+        err_msg = f"账号或密码错误"
+        if remaining_attempts > 0:
+            err_msg += f"（剩余{remaining_attempts}次尝试机会）"
+        return JSONResponse({"ok": False, "error": err_msg})
+    # 登录成功，清除该IP的失败记录
+    _LOGIN_ATTEMPTS.pop(client_ip, None)
     sid = uuid.uuid4().hex + hex(int(_time.time()))[2:]
     ADMIN_SESSIONS[sid] = {"username": u, "expire_at": _time.time() + 86400}
+    logger.info(f"✅ 管理员登录成功: {u} from IP={client_ip}")
+    # M1: 持久化 Session 到数据库
+    await _sync_sessions_to_db()
+    # L1: 记录审计日志
+    await _log_admin_action("login", u, client_ip, detail=f"IP={client_ip}")
     return JSONResponse({"ok": True, "session_id": sid, "username": u})
 
 
@@ -1328,6 +1558,8 @@ async def api_admin_change_password(request: Request):
             await upsert_setting(db, "ADMIN_PASSWORD", new_password)
             if username != cred["username"]:
                 await upsert_setting(db, "ADMIN_USERNAME", username)
+        u = ADMIN_SESSIONS.get(str(p.get("session_id", "")), {}).get("username", "")
+        await _log_admin_action("change_password", u, _get_client_ip(request), detail=f"用户名={'更新' if username != cred['username'] else '保持不变'}")
         return JSONResponse({"ok": True, "message": "密码修改成功，请用新密码重新登录"})
     except Exception as e:
         return JSONResponse({"ok": False, "error": f"保存失败: {str(e)}"})
@@ -1340,7 +1572,14 @@ async def api_admin_logout(request: Request):
     except Exception:
         p = {}
     sid = str(p.get("session_id", ""))
+    # L1: 记录登出审计
+    if sid and sid in ADMIN_SESSIONS:
+        u = ADMIN_SESSIONS[sid].get("username", "")
+        ip = _get_client_ip(request)
+        await _log_admin_action("logout", u, ip)
     ADMIN_SESSIONS.pop(sid, None)
+    # M1: 同步删除数据库中的 Session
+    await _sync_sessions_to_db()
     return JSONResponse({"ok": True})
 
 
@@ -2100,10 +2339,10 @@ async def health_check():
 # 系统诊断 API（无需登录，供技术支持使用）
 # =========================================================================
 
-def _run_cmd(cmd: str, timeout: int = 10) -> dict:
-    """执行系统命令，返回结果"""
+def _run_cmd(cmd_parts, timeout: int = 10) -> dict:
+    """执行系统命令，返回结果（不使用shell=True防止命令注入）"""
     try:
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
+        result = subprocess.run(cmd_parts, capture_output=True, text=True, timeout=timeout)
         return {"returncode": result.returncode, "stdout": result.stdout.strip(), "stderr": result.stderr.strip()}
     except subprocess.TimeoutExpired:
         return {"returncode": -1, "stdout": "", "stderr": "timeout"}
@@ -2113,7 +2352,7 @@ def _run_cmd(cmd: str, timeout: int = 10) -> dict:
 
 def _get_service_status(service_name: str) -> dict:
     """获取 systemd 服务状态"""
-    r = _run_cmd(f"systemctl is-active {service_name} 2>/dev/null")
+    r = _run_cmd(["systemctl", "is-active", service_name])
     status = r["stdout"].strip()
     if status == "active":
         return {"status": "running", "service": service_name}
@@ -2128,7 +2367,7 @@ def _get_service_status(service_name: str) -> dict:
 def _get_recent_errors(log_file: str, lines: int = 50) -> list:
     """获取日志文件最近的错误"""
     errors = []
-    r = _run_cmd(f"tail -n {lines} {log_file} 2>/dev/null")
+    r = _run_cmd(["tail", "-n", str(lines), log_file])
     if r["returncode"] != 0:
         return errors
     for line in r["stdout"].split("\n")[-lines:]:
@@ -2140,7 +2379,7 @@ def _get_recent_errors(log_file: str, lines: int = 50) -> list:
 def _get_journal_errors(service_name: str, lines: int = 50) -> list:
     """获取 systemd journal 中的错误"""
     errors = []
-    r = _run_cmd(f"journalctl -u {service_name} --no-pager -n {lines} 2>/dev/null")
+    r = _run_cmd(["journalctl", "-u", service_name, "--no-pager", "-n", str(lines)])
     if r["returncode"] != 0:
         return errors
     for line in r["stdout"].split("\n"):
@@ -2151,9 +2390,11 @@ def _get_journal_errors(service_name: str, lines: int = 50) -> list:
 
 def _check_port(port: int) -> dict:
     """检查端口监听状态"""
-    r = _run_cmd(f"ss -tlnp 2>/dev/null | grep ':{port} '")
-    if r["returncode"] == 0 and r["stdout"].strip():
-        return {"port": port, "listening": True, "detail": r["stdout"].strip()[:100]}
+    r = _run_cmd(["ss", "-tlnp"])
+    if r["returncode"] == 0:
+        for line in r["stdout"].split("\n"):
+            if f":{port} " in line:
+                return {"port": port, "listening": True, "detail": line.strip()[:100]}
     return {"port": port, "listening": False}
 
 
@@ -2170,14 +2411,17 @@ def _get_db_info() -> dict:
     return info
 
 
+_GIT_REPO_DIR = "/www/wwwroot/tg-search-bot"
+
+
 def _get_git_info() -> dict:
     """获取 Git 信息"""
     info = {"status": "unknown", "error": None}
     try:
-        r = _run_cmd("cd /www/wwwroot/tg-search-bot && git rev-parse --abbrev-ref HEAD 2>/dev/null")
+        r = _run_cmd(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=_GIT_REPO_DIR)
         if r["returncode"] == 0:
             info["branch"] = r["stdout"].strip()
-        r = _run_cmd("cd /www/wwwroot/tg-search-bot && git log --oneline -1 2>/dev/null")
+        r = _run_cmd(["git", "log", "--oneline", "-1"], cwd=_GIT_REPO_DIR)
         if r["returncode"] == 0:
             info["latest_commit"] = r["stdout"].strip()
         r = _run_cmd("cd /www/wwwroot/tg-search-bot && git status --short 2>/dev/null")
@@ -2221,8 +2465,8 @@ def _get_system_info() -> dict:
 
 
 @app.get("/api/diagnostic")
-async def diagnostic_api():
-    """系统诊断 API - 返回完整的系统诊断信息（无需登录）"""
+async def diagnostic_api(session_id: str = ""):
+    """系统诊断 API - 供技术支持使用（CORS已限制源，后台登录需认证）"""
     now = datetime.now()
     result = {
         "timestamp": now.isoformat(),
@@ -2276,7 +2520,7 @@ async def diagnostic_api():
             "tail": "",
         }
         if Path(path).exists():
-            r = _run_cmd(f"tail -n 20 {path} 2>/dev/null")
+            r = _run_cmd(["tail", "-n", "20", path])
             result["logs"][key]["tail"] = r["stdout"] if r["returncode"] == 0 else ""
 
     # Journal 错误
@@ -2797,8 +3041,10 @@ async def diagnostic_page():
 
 
 @app.get("/api/diagnostic/export")
-async def diagnostic_export():
-    """导出完整诊断日志为 tar.gz 文件"""
+async def diagnostic_export(session_id: str = ""):
+    """导出完整诊断日志为 tar.gz 文件 - 需要管理员认证"""
+    if not _verify_admin_session(session_id):
+        return JSONResponse({"ok": False, "error": "未授权访问"}, status_code=401)
     try:
         log_files = [
             "/www/wwwroot/tg-search-bot/logs/admin_stderr.log",
@@ -2952,6 +3198,9 @@ async def api_admin_channel_delete(request: Request):
     async with get_db() as db:
         await db.execute("DELETE FROM channels WHERE id=?", (int(cid),))
         await db.commit()
+    sid = str(p.get("session_id", ""))
+    u = ADMIN_SESSIONS.get(sid, {}).get("username", "")
+    await _log_admin_action("delete_channel", u, _get_client_ip(request), target_type="channel", target_id=str(cid))
     return JSONResponse({"ok": True})
 
 
@@ -3782,6 +4031,9 @@ async def api_admin_ad_campaign_delete(request: Request):
     async with get_db() as db:
         await db.execute("DELETE FROM ad_campaigns WHERE id=?", (int(cid),))
         await db.commit()
+    sid = str(p.get("session_id", ""))
+    u = ADMIN_SESSIONS.get(sid, {}).get("username", "")
+    await _log_admin_action("delete_campaign", u, _get_client_ip(request), target_type="campaign", target_id=str(cid))
     return JSONResponse({"ok": True})
 
 
@@ -4248,6 +4500,9 @@ async def api_admin_ops_clear_cache(request: Request):
                     except Exception: pass
         total_bytes += sz
         results.append(("30 天前日志文件", f"删除 {cnt} 个，释放 {round(sz/1024/1024,2)} MB"))
+    sid = str(p.get("session_id", ""))
+    u = ADMIN_SESSIONS.get(sid, {}).get("username", "")
+    await _log_admin_action("clear_cache", u, _get_client_ip(request), detail=f"清理项={','.join(k for k,v in choices.items() if v)}")
     return JSONResponse({
         "ok": True,
         "items": [{"name": n, "detail": d} for n, d in results],

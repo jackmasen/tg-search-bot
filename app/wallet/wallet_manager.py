@@ -18,8 +18,11 @@ import time
 import uuid
 import asyncio
 import hashlib
+import hmac
+import base64
 from datetime import datetime, timedelta
 from loguru import logger
+from cryptography.fernet import Fernet
 from app.database import get_db
 from app.config import Config
 
@@ -27,6 +30,14 @@ from app.config import Config
 # 模块级HD钱包实例（懒加载，避免未配置助记词时启动报错）
 _HDWALLET_INSTANCE = None
 _HDWALLET_MNEMONIC = ""
+
+# Fernet密钥派生（从CRYPTO_SECRET或SESSION_SECRET派生，确保确定性）
+def _derive_fernet_key() -> bytes:
+    """从 CRYPTO_SECRET 派生 Fernet 密钥（确定性，支持加解密往返）"""
+    secret = (Config.CRYPTO_SECRET or Config.SESSION_SECRET or "default-secret-change-me").encode()
+    # 用 HMAC-SHA256 从 secret 派生 32 字节 Fernet 密钥
+    key = hmac.new(secret, b"wallet-private-key-derivation-v1", hashlib.sha256).digest()
+    return base64.urlsafe_b64encode(key)
 
 
 def _get_hdwallet():
@@ -74,16 +85,33 @@ def _derive_hd_address(index: int) -> tuple:
 
 
 def _encrypt_private_key(priv_hex: str) -> str:
-    """用CRYPTO_SECRET做AES-GCM加密私钥（简化版：仅做XOR掩码，真上线换成cryptography库）"""
+    """用 Fernet 加密私钥（从 CRYPTO_SECRET 派生确定性密钥，兼容旧 ENCv1 数据）"""
     if not priv_hex:
         return ""
-    secret = (Config.CRYPTO_SECRET or Config.SESSION_SECRET or "default-secret-change-me").encode()
-    key = hashlib.sha256(secret).digest()
-    # 简化加密：先base64再hash前缀标记，生产请换 cryptography.Fernet
-    import base64
-    data = priv_hex.encode()
-    masked = bytes(b ^ key[i % len(key)] for i, b in enumerate(data))
-    return "ENCv1:" + base64.b64encode(masked).decode()
+    f = Fernet(_derive_fernet_key())
+    return "ENCv2:" + f.encrypt(priv_hex.encode()).decode()
+
+
+def _decrypt_private_key(encrypted: str) -> str:
+    """解密私钥，兼容 ENCv1（XOR）和 ENCv2（Fernet）格式"""
+    if not encrypted:
+        return ""
+    if encrypted.startswith("ENCv2:"):
+        f = Fernet(_derive_fernet_key())
+        return f.decrypt(encrypted[6:]).decode()
+    # 兼容旧 ENCv1 数据：降级为明文返回（提示用户重新生成地址）
+    if encrypted.startswith("ENCv1:"):
+        logger.warning("发现 ENCv1（XOR加密）私钥，建议重新分配地址以迁移至 ENCv2（Fernet）")
+        import base64
+        secret = (Config.CRYPTO_SECRET or Config.SESSION_SECRET or "default-secret-change-me").encode()
+        key = hashlib.sha256(secret).digest()
+        try:
+            masked = base64.b64decode(encrypted[6:])
+            decrypted = bytes(b ^ key[i % len(key)] for i, b in enumerate(masked))
+            return decrypted.decode()
+        except Exception:
+            return ""
+    return encrypted
 
 
 class WalletManager:

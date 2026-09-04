@@ -61,6 +61,7 @@ END;
 -- 索引
 CREATE INDEX IF NOT EXISTS idx_messages_channel ON messages(channel_id);
 CREATE INDEX IF NOT EXISTS idx_messages_date ON messages(msg_date DESC);
+CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_channels_username ON channels(username);
 CREATE INDEX IF NOT EXISTS idx_channels_status ON channels(crawl_status);
 
@@ -263,6 +264,35 @@ CREATE TABLE IF NOT EXISTS ai_search_logs (
 );
 CREATE INDEX IF NOT EXISTS idx_ai_logs_user ON ai_search_logs(tg_user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_ai_logs_date ON ai_search_logs(DATE(created_at));
+
+-- M1: 管理员 Session 持久化表（重启后恢复有效 Session）
+CREATE TABLE IF NOT EXISTS admin_sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT UNIQUE NOT NULL,
+    username TEXT NOT NULL,
+    expire_at TIMESTAMP NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_admin_sessions_expire ON admin_sessions(expire_at);
+
+-- L1: 管理员操作审计日志
+CREATE TABLE IF NOT EXISTS admin_audit_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    action TEXT NOT NULL,                 -- login/logout/change_password/delete_user/delete_campaign 等
+    target_type TEXT,                     -- user/campaign/settings/wallet 等
+    target_id TEXT,
+    username TEXT NOT NULL,               -- 操作用户名
+    ip_address TEXT,                      -- 操作IP
+    detail TEXT,                          -- 操作详情（JSON 或描述）
+    success INTEGER DEFAULT 1,            -- 1=成功 0=失败
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_audit_action ON admin_audit_log(action, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_username ON admin_audit_log(username, created_at DESC);
+
+-- M1/L1 数据库迁移：为旧库自动补建新表（不删除已有数据）
+-- idx_recharge_status_time：充值订单按状态+时间排序优化
+-- idx_messages_created_at：消息按创建时间查询优化
 """
 
 

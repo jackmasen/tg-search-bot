@@ -61,18 +61,6 @@ def setup_logging():
         level=Config.LOG_LEVEL,
         encoding="utf-8",
     )
-    logger.add(
-        sys.stderr,
-        level=Config.LOG_LEVEL,
-        format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level:<8}</level> | <cyan>{name}</cyan> - {message}",
-    )
-    logger.add(
-        f"{Config.LOG_DIR}/bot_{{time}}.log",
-        rotation="10 MB",
-        retention="30 days",
-        level=Config.LOG_LEVEL,
-        encoding="utf-8",
-    )
 
 
 async def post_init(app: Application):
@@ -106,12 +94,15 @@ def main():
         sys.exit(1)
 
     logger.info(f"启动 TG搜索机器人 v{Config.APP_VERSION}")
-    logger.info(f"Bot Token: {'已配置 ✓' if Config.BOT_TOKEN else '未配置（将从数据库加载）'}")
+    _token_display = (f"{Config.BOT_TOKEN[:6]}****{Config.BOT_TOKEN[-4:]}"
+                      if Config.BOT_TOKEN and len(Config.BOT_TOKEN) > 10
+                      else ("已配置 ✓" if Config.BOT_TOKEN else "未配置（将从数据库加载）"))
+    logger.info(f"Bot Token: {_token_display}")
 
     # 提前加载DB配置（在构建Application之前，确保BOT_TOKEN已就位）
     logger.info("提前加载数据库配置...")
     asyncio.run(_load_config_from_db())
-    logger.info(f"Bot Token: {'已配置 ✓' if Config.BOT_TOKEN else '仍未配置，将尝试启动'}")
+    logger.info(f"Bot Token: {_token_display}")
 
     # 创建Bot应用
     application = Application.builder().token(Config.BOT_TOKEN).post_init(post_init).build()

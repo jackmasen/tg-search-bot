@@ -16,7 +16,7 @@ PROJECT_ROOT = Path(__file__).parent.absolute()
 DESKTOP = Path.home() / "Desktop"
 
 # 版本号（从交接文档读取）
-VERSION = "1.0.28"
+VERSION = "1.0.29"
 TIMESTAMP = datetime.now().strftime("%Y%m%d_%H%M%S")
 
 # 排除规则
