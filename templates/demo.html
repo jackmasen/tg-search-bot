@@ -47,7 +47,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 .phone-header .bot-info { flex: 1; }
 .phone-header .bot-name { font-size: 13px; font-weight: 600; color: #fff; }
 .phone-header .bot-status { font-size: 10px; color: #10b981; }
-.phone-chat { padding: 10px; overflow-y: auto; height: calc(var(--phone-h) - 70px - 50px); display: flex; flex-direction: column; gap: 6px; }
+.phone-chat { padding: 10px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
 .phone-chat::-webkit-scrollbar { width: 3px; }
 .phone-chat::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
 .phone-input-bar { position: absolute; bottom: 0; left: 0; right: 0; background: #17212b; border-top: 1px solid #2b5278; padding: 8px 10px; display: flex; gap: 6px; align-items: center; }
@@ -60,26 +60,27 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 .msg-user { background: #2b5278; align-self: flex-end; border-bottom-right-radius: 4px; }
 .msg-fade { animation: fade 0.25s ease-in; }
 @keyframes fade { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
-.module-slot { position: absolute; background: #182533; border: 1px solid #2b5278; border-radius: 12px; overflow: hidden; min-width: 60px; min-height: 40px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); transition: box-shadow 0.15s; }
-.module-slot:hover { border-color: var(--accent); box-shadow: 0 0 16px rgba(42,171,238,0.25); }
-.module-slot .ms-handle { position: absolute; top: 0; left: 0; right: 0; height: 24px; background: #1e3a5f; display: flex; align-items: center; padding: 0 8px; cursor: grab; font-size: 10px; color: #94a3b8; font-weight: 600; border-bottom: 1px solid #2b5278; user-select: none; }
+.module-slot { position: absolute; background: rgba(24,37,51,0.72); border-radius: 12px; overflow: hidden; min-width: 60px; min-height: 40px; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); transition: box-shadow 0.15s; }
+.module-slot.dragging { box-shadow: 0 0 0 1.5px rgba(42,171,238,0.5), 0 12px 32px rgba(0,0,0,0.4); z-index: 50 !important; }
+.module-slot.resizing { box-shadow: 0 0 0 1.5px rgba(245,158,11,0.5), 0 8px 20px rgba(0,0,0,0.3); z-index: 50 !important; }
+.module-slot .ms-handle { position: absolute; top: 0; left: 0; right: 0; height: 24px; display: flex; align-items: center; padding: 0 8px; cursor: grab; font-size: 10px; color: rgba(148,163,184,0.6); font-weight: 600; user-select: none; }
 .module-slot .ms-handle:active { cursor: grabbing; }
 .module-slot .ms-handle .handle-dots { letter-spacing: 2px; margin-right: 4px; }
 .module-slot .ms-body { padding: 8px; overflow: auto; height: calc(100% - 24px); font-size: 11px; }
 .module-slot .ms-body::-webkit-scrollbar { width: 2px; }
-.module-slot .ms-body::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
-.module-slot .ms-resize { position: absolute; bottom: 0; right: 0; width: 16px; height: 16px; cursor: nwse-resize; background: linear-gradient(135deg, transparent 50%, #2b5278 50%); border-radius: 0 0 12px 0; }
-.module-slot .ms-resize:hover { background: linear-gradient(135deg, transparent 50%, var(--accent) 50%); }
-.module-slot .ms-del { position: absolute; top: 2px; right: 6px; color: #ef4444; cursor: pointer; font-size: 12px; line-height: 1; opacity: 0; transition: opacity 0.15s; }
+.module-slot .ms-body::-webkit-scrollbar-thumb { background: rgba(51,65,85,0.6); border-radius: 2px; }
+.module-slot .ms-resize { position: absolute; bottom: 0; right: 0; width: 16px; height: 16px; cursor: nwse-resize; background: linear-gradient(135deg, transparent 50%, rgba(43,82,120,0.5) 50%); border-radius: 0 0 12px 0; }
+.module-slot .ms-resize:hover { background: linear-gradient(135deg, transparent 50%, rgba(42,171,238,0.5) 50%); }
+.module-slot .ms-del { position: absolute; top: 2px; right: 6px; color: rgba(239,68,68,0.6); cursor: pointer; font-size: 12px; line-height: 1; opacity: 0; transition: opacity 0.15s; }
 .module-slot:hover .ms-del { opacity: 1; }
-.module-slot .ms-del:hover { color: #ff6b6b; }
-.ad-row { display: flex; flex-direction: row; align-items: center; gap: 4px; padding: 5px 8px; border-radius: 8px; margin-bottom: 4px; background: linear-gradient(90deg,#1e3a5f,#2b5278); border: 1px solid rgba(255,255,255,0.06); font-size: 10px; }
+.module-slot .ms-del:hover { color: #ef4444; }
+.ad-row { display: flex; flex-direction: row; align-items: center; gap: 4px; padding: 5px 8px; border-radius: 8px; margin-bottom: 4px; background: rgba(30,58,95,0.5); font-size: 10px; }
 .ad-title { color: #fff; font-weight: 600; flex: 0 1 45%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ad-action { font-size: 9px; padding: 1px 6px; border-radius: 4px; white-space: nowrap; flex-shrink: 0; background: linear-gradient(135deg,#059669,#10b981); color: #fff; }
 .hot-kw-row { display: flex; align-items: center; gap: 4px; margin-bottom: 3px; font-size: 10px; }
 .hot-kw-label { color: #94a3b8; min-width: 50px; flex-shrink: 0; }
 .hot-kw-chips { display: flex; flex-wrap: wrap; gap: 3px; flex: 1; }
-.hot-kw-chip { font-size: 10px; background: #334155; color: #e2e8f0; padding: 1px 6px; border-radius: 999px; border: 1px solid #475569; cursor: pointer; white-space: nowrap; }
+.hot-kw-chip { font-size: 10px; background: rgba(51,65,85,0.6); color: #e2e8f0; padding: 1px 6px; border-radius: 999px; border: none; cursor: pointer; white-space: nowrap; }
 .hot-kw-chip:hover { background: #475569; }
 .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
 .stat-cell { background: #0f172a; border-radius: 6px; padding: 6px; text-align: center; }
@@ -94,7 +95,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 .toast.info { border-color: #2AABEE; }
 @keyframes slideIn { from { opacity: 0; transform: translateX(40px); } to { opacity: 1; transform: none; } }
 .tg-keyboard { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
-.tg-kb-btn { font-size: 10px; padding: 4px 8px; border-radius: 6px; background: #1e3a5f; color: #fff; border: 1px solid #2b5278; cursor: pointer; flex: 1 1 calc(50% - 2px); text-align: center; min-width: 80px; }
+.tg-kb-btn { font-size: 10px; padding: 4px 8px; border-radius: 6px; background: rgba(30,58,95,0.5); color: #fff; border: none; cursor: pointer; flex: 1 1 calc(50% - 2px); text-align: center; min-width: 80px; }
 .tg-kb-btn:hover { background: #2b5278; }
 .demo-search-box { display: flex; gap: 4px; margin-bottom: 6px; }
 .demo-search-box input { flex: 1; background: #0f172a; border: 1px solid #2b5278; border-radius: 8px; padding: 5px 10px; color: #fff; font-size: 11px; outline: none; }
@@ -112,6 +113,16 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 .format-tab.active { background: #2b5278; border-color: var(--accent); color: #fff; }
 .spinner { width: 16px; height: 16px; border: 2px solid #334155; border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; display: inline-block; }
 @keyframes spin { to { transform: rotate(360deg); } }
+@keyframes slideRight { from { transform: translateX(-8px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+@keyframes slideOut { to { transform: translateX(10px); opacity: 0; } }
+.slide-in { animation: slideRight 0.2s ease forwards; }
+.slide-out { animation: slideOut 0.15s ease forwards; }
+.template-item { display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: #0f172a; border: 1px solid #334155; border-radius: 8px; margin-bottom: 6px; cursor: default; transition: all 0.15s; }
+.template-item:hover { border-color: var(--accent); background: #1e293b; }
+.template-item .tmpl-name { flex: 1; font-size: 12px; font-weight: 500; }
+.template-item .tmpl-meta { font-size: 10px; color: #64748b; }
+.template-item .tmpl-btns { display: flex; gap: 4px; }
+.template-empty { font-size: 12px; color: #64748b; text-align: center; padding: 16px 0; }
 @media (max-width: 900px) { .main-layout { flex-direction: column; } .panel-left { width: 100%; flex-direction: row; flex-wrap: wrap; } .tool-card { flex: 1; min-width: 240px; } .phone-frame { width: 320px; height: 568px; } }
 </style>
 </head>
@@ -150,7 +161,15 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
         <div class="format-tab" data-cols="2" onclick="setLayout(2)">双列</div>
         <div class="format-tab" data-cols="3" onclick="setLayout(3)">三列</div>
       </div>
-      <div style="font-size:11px;color:#64748b;margin-top:4px;">💡 拖拽顶部横条移动模块 · 拖拽右下角缩放</div>
+      <div style="font-size:11px;color:#64748b;margin-top:4px;">💡 拖拽左侧列表排序模块 · 拖拽顶部横条移动 · 右下角缩放</div>
+    </div>
+    <div class="tool-card">
+      <h3><span class="dot" style="background:#8b5cf6;"></span>模板管理</h3>
+      <div id="templateList" class="template-empty">加载中...</div>
+      <div class="btn-row" style="margin-top:8px;">
+        <button class="btn btn-primary btn-sm" onclick="showSaveTemplateModal()">💾 保存为模板</button>
+        <button class="btn btn-warning btn-sm" onclick="refreshTemplates()">🔄 刷新</button>
+      </div>
     </div>
     <div class="tool-card">
       <h3><span class="dot" style="background:#10b981;"></span>快捷操作</h3>
@@ -195,11 +214,12 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
         <input type="text" id="chatInput" placeholder="输入关键词搜索..." onkeydown="if(event.key==='Enter')sendCommand(this.value)">
         <button onclick="sendCommand(document.getElementById('chatInput').value)">➤</button>
       </div>
-      <div id="moduleContainer" style="position:absolute;top:70px;left:0;right:0;bottom:44px;pointer-events:none;"></div>
+      <div id="moduleContainer" style="position:absolute;top:70px;left:0;right:0;bottom:44px;"></div>
     </div>
   </div>
 </div>
 
+<!-- 添加模块弹窗 -->
 <div class="modal-overlay" id="addModuleModal" style="display:none;" onclick="if(event.target===this)closeModal()">
   <div class="modal-box">
     <span class="modal-close" onclick="closeModal()">✕</span>
@@ -209,10 +229,11 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
       <option value="search_box">🔍 搜索框</option>
       <option value="result_list">📋 搜索结果列表</option>
       <option value="hot_keywords">⭐ 热门搜索</option>
-      <option value="ads">📣 广告卡片</option>
+      <option value="ads">📣 广告合作</option>
       <option value="wallet">💰 钱包余额</option>
       <option value="stats">📊 数据统计</option>
-      <option value="quick_actions">⚡ 快捷操作按钮</option>
+      <option value="channel_promo">📢 频道推广</option>
+      <option value="advertise">📣 广告合作入口</option>
       <option value="custom_html">📝 自定义HTML</option>
     </select>
     <label id="customHtmlLabel" style="display:none;">自定义HTML内容</label>
@@ -221,6 +242,31 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
   </div>
 </div>
 
+<!-- 保存模板弹窗 -->
+<div class="modal-overlay" id="saveTemplateModal" style="display:none;" onclick="if(event.target===this)closeSaveTemplateModal()">
+  <div class="modal-box">
+    <span class="modal-close" onclick="closeSaveTemplateModal()">✕</span>
+    <h3>💾 保存为模板</h3>
+    <label>模板名称</label>
+    <input type="text" id="templateNameInput" placeholder="例如：首页默认布局" maxlength="50">
+    <button class="btn btn-primary" onclick="saveTemplate()">保存模板</button>
+  </div>
+</div>
+
+<!-- 应用模板确认弹窗 -->
+<div class="modal-overlay" id="applyTemplateModal" style="display:none;" onclick="if(event.target===this)closeApplyTemplateModal()">
+  <div class="modal-box">
+    <span class="modal-close" onclick="closeApplyTemplateModal()">✕</span>
+    <h3>⚠️ 确认应用模板</h3>
+    <p style="font-size:13px;color:#94a3b8;margin-bottom:16px;" id="applyTemplateMsg">应用此模板将替换当前布局，是否继续？</p>
+    <div style="display:flex;gap:8px;">
+      <button class="btn btn-sm" style="background:#334155;color:#fff;" onclick="closeApplyTemplateModal()">取消</button>
+      <button class="btn btn-sm btn-warning" id="confirmApplyBtn" onclick="confirmApplyTemplate()">确认应用</button>
+    </div>
+  </div>
+</div>
+
+<!-- 推送弹窗 -->
 <div class="modal-overlay" id="pushModal" style="display:none;" onclick="if(event.target===this)closePushModal()">
   <div class="modal-box">
     <span class="modal-close" onclick="closePushModal()">✕</span>
@@ -240,26 +286,38 @@ let currentUser = DEMO_USERS[0];
 let layoutColumns = 1;
 let modules = [];
 let moduleCounter = 0;
+let pendingApplyId = null;
 
 const MODULE_TYPES = {
   search_box: { name: '搜索框', icon: '🔍', defaultW: 340, defaultH: 50, top: 75, left: 15 },
   result_list: { name: '搜索结果', icon: '📋', defaultW: 340, defaultH: 200, top: 135, left: 15 },
   hot_keywords: { name: '热门搜索', icon: '⭐', defaultW: 340, defaultH: 80, top: 135, left: 15 },
-  ads: { name: '广告卡片', icon: '📣', defaultW: 340, defaultH: 100, top: 225, left: 15 },
+  ads: { name: '广告合作', icon: '📣', defaultW: 340, defaultH: 100, top: 225, left: 15 },
   wallet: { name: '钱包余额', icon: '💰', defaultW: 165, defaultH: 80, top: 135, left: 15 },
   stats: { name: '数据统计', icon: '📊', defaultW: 165, defaultH: 80, top: 225, left: 15 },
-  quick_actions: { name: '快捷操作', icon: '⚡', defaultW: 340, defaultH: 60, top: 335, left: 15 },
+  channel_promo: { name: '频道推广', icon: '📢', defaultW: 340, defaultH: 130, top: 325, left: 15 },
+  advertise: { name: '广告合作入口', icon: '📣', defaultW: 340, defaultH: 80, top: 455, left: 15 },
   custom_html: { name: '自定义HTML', icon: '📝', defaultW: 340, defaultH: 100, top: 400, left: 15 },
 };
 
-const PRESET_MODULES = ['search_box', 'result_list', 'hot_keywords', 'ads', 'wallet', 'stats', 'quick_actions'];
+// 旧版模块类型映射（兼容历史布局数据）
+const LEGACY_TYPE_MAP = {
+  title: 'custom_html',
+  search: 'search_box',
+  hot: 'hot_keywords',
+  ad: 'ads',
+};
+
+const PRESET_MODULES = ['search_box', 'result_list', 'hot_keywords', 'ads', 'wallet', 'stats', 'channel_promo', 'advertise'];
 
 document.addEventListener('DOMContentLoaded', async () => {
   await loadLayoutFromServer();
   loadLayout();
   renderModules();
   setupInteract();
+  setupDragDrop();
   updateUserLabel();
+  await loadTemplates();
   document.getElementById('userSwitcher').addEventListener('change', (e) => {
     const uid = parseInt(e.target.value);
     currentUser = DEMO_USERS.find(u => u.id === uid) || DEMO_USERS[0];
@@ -271,16 +329,60 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('customHtmlLabel').style.display = isCustom ? 'block' : 'none';
     document.getElementById('customHtmlContent').style.display = isCustom ? 'block' : 'none';
   });
+  document.getElementById('templateNameInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') saveTemplate(); });
 });
+
+function setupDragDrop() {
+  const list = document.getElementById('moduleList');
+  if (!list) return;
+  list.addEventListener('dragover', e => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    const after = getDragAfterElement(list, e.clientY);
+    const dragging = list.querySelector('.dragging');
+    if (dragging) {
+      if (after == null) list.appendChild(dragging);
+      else list.insertBefore(dragging, after);
+    }
+  });
+  list.addEventListener('drop', e => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    const ids = [...list.querySelectorAll('.module-item')].map(el => parseInt(el.dataset.id));
+    modules.sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id));
+    renderModules();
+    saveLayout();
+  });
+}
 
 async function loadLayoutFromServer() {
   try {
     const resp = await fetch('/api/demo/config');
     const data = await resp.json();
     if (data.ok && data.layout && data.layout.modules && data.layout.modules.length > 0) {
-      modules = data.layout.modules;
+      const rawModules = data.layout.modules;
+      modules = rawModules.map((m, idx) => {
+        // 兼容旧版模块类型
+        let type = m.type;
+        if (LEGACY_TYPE_MAP[type]) type = LEGACY_TYPE_MAP[type];
+        // 兼容旧版坐标格式 x/y → left/top
+        const left = m.left !== undefined ? m.left : (m.x !== undefined ? m.x : 15);
+        const top = m.top !== undefined ? m.top : (m.y !== undefined ? m.y : 75 + idx * 100);
+        const def = MODULE_TYPES[type] || MODULE_TYPES.custom_html;
+        return {
+          id: m.id || ++moduleCounter,
+          type,
+          top,
+          left,
+          w: m.w || def.defaultW,
+          h: m.h || def.defaultH,
+          visible: m.visible !== false,
+          customHtml: m.customHtml || '',
+        };
+      }).filter(m => MODULE_TYPES[m.type]);
       layoutColumns = data.layout.columns || 1;
-      moduleCounter = modules.length;
+      moduleCounter = Math.max(moduleCounter, ...modules.map(m => m.id || 0));
+      saveLayout();
     }
   } catch (e) { console.log('加载布局失败，使用默认布局', e); }
 }
@@ -303,9 +405,19 @@ function loadLayout() {
     });
   }
 }
-function saveLayout() { localStorage.setItem('demoLayout', JSON.stringify(modules)); }
+async function saveLayout() {
+  localStorage.setItem('demoLayout', JSON.stringify(modules));
+  try {
+    await fetch('/api/demo/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ layout: { modules, columns: layoutColumns } }),
+    });
+  } catch(e) { console.error('保存布局失败', e); }
+}
 
 function resetModules() {
+  if (!confirm('确认重置布局？所有自定义修改将丢失。')) return;
   modules = []; moduleCounter = 0; layoutColumns = 1;
   document.querySelectorAll('.format-tab').forEach(t => t.classList.remove('active'));
   document.querySelector('.format-tab[data-cols="1"]').classList.add('active');
@@ -345,21 +457,46 @@ function addModule() {
 function removeModule(id) { modules = modules.filter(m => m.id !== id); renderModules(); saveLayout(); }
 function toggleModule(id) { const m = modules.find(m => m.id === id); if (m) m.visible = !m.visible; renderModules(); saveLayout(); }
 
+function adjustPhoneFrame() {
+  const frame = document.getElementById('phoneFrame');
+  const chat = document.getElementById('phoneChat');
+  const slots = document.querySelectorAll('.module-slot');
+  if (!slots.length) {
+    frame.style.height = '';
+    chat.style.height = '';
+    return;
+  }
+  let maxBottom = 0;
+  slots.forEach(s => {
+    const t = parseFloat(s.style.top) || 0;
+    const h = parseFloat(s.style.height) || 0;
+    const b = t + h;
+    if (b > maxBottom) maxBottom = b;
+  });
+  const HEADER_H = 70;
+  const INPUT_H = 44;
+  const PAD = 20;
+  const totalH = HEADER_H + maxBottom + INPUT_H + PAD;
+  frame.style.height = totalH + 'px';
+  chat.style.height = '';
+}
+
 function renderModules() {
   const container = document.getElementById('moduleContainer');
   container.innerHTML = '';
-  document.getElementById('moduleList').innerHTML = '';
+  const list = document.getElementById('moduleList');
+  list.innerHTML = '';
   modules.forEach((m, idx) => {
     const def = MODULE_TYPES[m.type];
     if (!def) return;
     const item = document.createElement('div');
-    item.className = 'module-item';
+    item.className = 'module-item slide-in';
     item.draggable = true;
     item.dataset.id = m.id;
     item.innerHTML = `<span class="mi-icon">${def.icon}</span><span class="mi-name">${def.name}</span><div class="mi-toggle ${m.visible ? 'on' : ''}" onclick="toggleModule(${m.id})"></div><span class="mi-del" onclick="removeModule(${m.id})">✕</span>`;
-    item.addEventListener('dragstart', e => { e.dataTransfer.setData('text/plain', m.id); item.classList.add('dragging'); });
-    item.addEventListener('dragend', () => item.classList.remove('dragging'));
-    document.getElementById('moduleList').appendChild(item);
+    item.addEventListener('dragstart', e => { e.dataTransfer.setData('text/plain', m.id); item.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; });
+    item.addEventListener('dragend', () => { item.classList.remove('dragging'); });
+    list.appendChild(item);
     if (!m.visible) return;
     const el = document.createElement('div');
     el.className = 'module-slot';
@@ -369,9 +506,7 @@ function renderModules() {
     container.appendChild(el);
     loadModuleContent(m, el);
   });
-  const list = document.getElementById('moduleList');
-  list.addEventListener('dragover', e => { e.preventDefault(); const after = getDragAfterElement(list, e.clientY); const dragging = list.querySelector('.dragging'); if (dragging) { if (after == null) list.appendChild(dragging); else list.insertBefore(dragging, after); } });
-  list.addEventListener('drop', e => { e.preventDefault(); const ids = [...list.querySelectorAll('.module-item')].map(el => parseInt(el.dataset.id)); modules.sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id)); renderModules(); saveLayout(); });
+  adjustPhoneFrame();
 }
 
 function getDragAfterElement(list, y) {
@@ -379,8 +514,106 @@ function getDragAfterElement(list, y) {
   return elements.reduce((closest, child) => { const box = child.getBoundingClientRect(); const offset = y - box.top - box.height / 2; if (offset < 0 && offset > closest.offset) return { offset, element: child }; return closest; }, { offset: Number.NEGATIVE_INFINITY }).element;
 }
 
+// 原生拖拽和缩放实现
+const dragState = { el: null, id: null, startX: 0, startY: 0, startLeft: 0, startTop: 0 };
+const resizeState = { el: null, id: null, startX: 0, startY: 0, startW: 0, startH: 0 };
+
 function setupInteract() {
-  interact('.module-slot').draggable({ allowFrom: '.ms-handle', inertia: true, modifiers: [interact.modifiers.restrictRect({ restriction: '#phoneFrame', endOnly: true })], listeners: { move(event) { const el = event.target; const id = parseInt(el.dataset.id); const m = modules.find(m => m.id === id); if (m) { m.top = Math.max(0, event.rect.top); m.left = Math.max(0, Math.min(event.rect.left, 375 - m.w)); } }, end() { saveLayout(); } } }).resizable({ allowFrom: '.ms-resize', edges: { top: false, left: false, right: true, bottom: true }, modifiers: [interact.modifiers.restrictSize({ min: { width: 60, height: 40 }, max: { width: 375, height: 500 } })], listeners: { move(event) { const el = event.target; const id = parseInt(el.dataset.id); const m = modules.find(m => m.id === id); if (m) { m.w = Math.max(60, event.rect.width); m.h = Math.max(40, event.rect.height); el.style.width = m.w + 'px'; el.style.height = m.h + 'px'; } }, end() { saveLayout(); } } });
+  const container = document.getElementById('moduleContainer');
+
+  container.addEventListener('mousedown', e => {
+    const handle = e.target.closest('.ms-handle');
+    const resizeH = e.target.closest('.ms-resize');
+    const slot = handle || resizeH;
+    if (!slot) return;
+
+    const slotEl = slot.closest('.module-slot');
+    if (!slotEl) return;
+
+    const id = parseInt(slotEl.dataset.id);
+    const m = modules.find(m => m.id === id);
+    if (!m) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    // 清理之前的状态
+    if (dragState.el) {
+      dragState.el.classList.remove('dragging');
+      dragState.el = null;
+      dragState.id = null;
+    }
+    if (resizeState.el) {
+      resizeState.el.classList.remove('resizing');
+      resizeState.el = null;
+      resizeState.id = null;
+    }
+
+    if (handle) {
+      dragState.el = slotEl;
+      dragState.id = id;
+      dragState.startX = e.clientX;
+      dragState.startY = e.clientY;
+      dragState.startLeft = m.left;
+      dragState.startTop = m.top;
+      slotEl.classList.add('dragging');
+      slotEl.classList.remove('resizing');
+      document.querySelectorAll('.module-slot').forEach(s => s.style.zIndex = '');
+      slotEl.style.zIndex = 100;
+    } else if (resizeH) {
+      resizeState.el = slotEl;
+      resizeState.id = id;
+      resizeState.startX = e.clientX;
+      resizeState.startY = e.clientY;
+      resizeState.startW = m.w;
+      resizeState.startH = m.h;
+      slotEl.classList.add('resizing');
+      slotEl.classList.remove('dragging');
+    }
+  });
+
+  document.addEventListener('mousemove', e => {
+    if (dragState.el) {
+      e.preventDefault();
+      const m = modules.find(m => m.id === dragState.id);
+      if (!m) return;
+      const dx = e.clientX - dragState.startX;
+      const dy = e.clientY - dragState.startY;
+      const newLeft = Math.max(0, Math.min(dragState.startLeft + dx, 375 - m.w));
+      const newTop = Math.max(0, dragState.startTop + dy);
+      m.left = newLeft;
+      m.top = newTop;
+      dragState.el.style.left = newLeft + 'px';
+      dragState.el.style.top = newTop + 'px';
+    } else if (resizeState.el) {
+      e.preventDefault();
+      const m = modules.find(m => m.id === resizeState.id);
+      if (!m) return;
+      const dx = e.clientX - resizeState.startX;
+      const dy = e.clientY - resizeState.startY;
+      m.w = Math.max(60, Math.min(375, resizeState.startW + dx));
+      m.h = Math.max(40, Math.min(500, resizeState.startH + dy));
+      resizeState.el.style.width = m.w + 'px';
+      resizeState.el.style.height = m.h + 'px';
+    }
+  });
+
+  document.addEventListener('mouseup', e => {
+    if (dragState.el) {
+      dragState.el.classList.remove('dragging');
+      dragState.el = null;
+      dragState.id = null;
+      adjustPhoneFrame();
+      saveLayout();
+    }
+    if (resizeState.el) {
+      resizeState.el.classList.remove('resizing');
+      resizeState.el = null;
+      resizeState.id = null;
+      adjustPhoneFrame();
+      saveLayout();
+    }
+  });
 }
 
 async function loadModuleContent(m, el) {
@@ -394,7 +627,8 @@ async function loadModuleContent(m, el) {
       case 'ads': await buildAds(m, body); break;
       case 'wallet': await buildWallet(m, body); break;
       case 'stats': await buildStats(m, body); break;
-      case 'quick_actions': body.innerHTML = buildQuickActionsHTML(); break;
+      case 'channel_promo': await buildChannelPromo(m, body); break;
+      case 'advertise': await buildAdvertise(m, body); break;
       case 'custom_html': body.innerHTML = m.customHtml || '<span style="color:#64748b;">自定义内容</span>'; break;
     }
   } catch(e) { body.innerHTML = '<span style="color:#ef4444;">加载失败</span>'; }
@@ -448,18 +682,21 @@ async function buildHotKeywords(m, body) {
 async function buildAds(m, body) {
   body.innerHTML = '<span class="spinner"></span> 加载中...';
   try {
-    const resp = await fetch('/api/bot/command', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ command: '/start', tg_user_id: currentUser.id }) });
+    const resp = await fetch('/api/bot/ad_templates');
     const data = await resp.json();
-    if (data.reply_html) {
-      const temp = document.createElement('div'); temp.innerHTML = data.reply_html;
-      const text = temp.textContent;
-      const adMatches = text.matchAll(/📣\s*([^\n]+)/g);
-      let adsHtml = '<div style="color:#f59e0b;font-weight:600;margin-bottom:4px;">📣 推荐频道</div>';
-      let count = 0;
-      for (const match of adMatches) { if (count >= 3) break; const title = match[1].trim().substring(0, 30); adsHtml += `<div class="ad-row"><span class="ad-title">${title}</span><span class="ad-action" onclick="openChannel('${title.replace(/'/g,"\\'")}')">加入</span></div>`; count++; }
-      if (count === 0) adsHtml += '<div style="color:#64748b;font-size:10px;">暂无推荐频道，请先在管理后台添加广告</div>';
-      body.innerHTML = adsHtml;
-    } else { body.innerHTML = '<span style="color:#64748b;">暂无广告数据</span>'; }
+    if (data.ok && data.templates && data.templates.length > 0) {
+      let html = '<div style="color:#f59e0b;font-weight:600;margin-bottom:4px;">📣 推荐频道</div>';
+      const count = Math.min(data.templates.length, 5);
+      for (let i = 0; i < count; i++) {
+        const ad = data.templates[i];
+        const title = (ad.title || ad.name || ad.keyword || '推广内容').toString().substring(0, 25);
+        const actionText = ad.action_text || '加入';
+        html += `<div class="ad-row"><span class="ad-title">${title}</span><span class="ad-action" onclick="openChannel('${title.replace(/'/g,"\\'")}')">${actionText}</span></div>`;
+      }
+      body.innerHTML = html;
+    } else {
+      body.innerHTML = '<div style="color:#64748b;font-size:10px;">暂无广告数据<br><span style="font-size:9px;">请先在管理后台添加广告模板</span></div>';
+    }
   } catch(e) { body.innerHTML = '<span style="color:#ef4444;">加载失败</span>'; }
 }
 
@@ -483,8 +720,40 @@ async function buildStats(m, body) {
   } catch(e) { body.innerHTML = '<span style="color:#ef4444;">加载失败</span>'; }
 }
 
-function buildQuickActionsHTML() {
-  return `<div style="color:#2AABEE;font-weight:600;margin-bottom:4px;">⚡ 快捷操作</div><div class="tg-keyboard"><div class="tg-kb-btn" onclick="sendCommand('/start')">🏠 首页</div><div class="tg-kb-btn" onclick="sendCommand('/stats')">📊 统计</div><div class="tg-kb-btn" onclick="sendCommand('/wallet')">💰 钱包</div><div class="tg-kb-btn" onclick="sendCommand('/recharge')">💵 充值</div><div class="tg-kb-btn" onclick="sendCommand('/channels')">📺 频道</div><div class="tg-kb-btn" onclick="sendCommand('/help')">❓ 帮助</div></div>`;
+async function buildChannelPromo(m, body) {
+  body.innerHTML = '<span class="spinner"></span> 加载中...';
+  try {
+    const resp = await fetch('/api/demo/featured_channels');
+    const data = await resp.json();
+    if (data.ok && data.channels && data.channels.length > 0) {
+      let html = '<div style="color:#f59e0b;font-weight:600;margin-bottom:4px;">📢 频道推广</div>';
+      const count = Math.min(data.channels.length, 6);
+      for (let i = 0; i < count; i++) {
+        const ch = data.channels[i];
+        const title = (ch.title || ch.username || '推荐频道').toString().substring(0, 28);
+        const members = ch.member_count ? `${(ch.member_count/1000).toFixed(1)}k` : '';
+        const url = ch.target_url || '#';
+        html += `<div class="ad-row"><span class="ad-title">${title}${members ? ` · 👥${members}` : ''}</span><span class="ad-action" onclick="openChannel('${title.replace(/'/g,"\\'")}')">加入</span></div>`;
+      }
+      body.innerHTML = html;
+    } else {
+      body.innerHTML = '<div style="color:#64748b;font-size:10px;">暂无推荐频道<br><span style="font-size:9px;">请先在管理后台添加频道</span></div>';
+    }
+  } catch(e) { body.innerHTML = '<span style="color:#ef4444;">加载失败</span>'; }
+}
+
+async function buildAdvertise(m, body) {
+  body.innerHTML = '<span class="spinner"></span> 加载中...';
+  try {
+    const resp = await fetch('/api/bot/command', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ command: '/advertise', tg_user_id: currentUser.id }) });
+    const data = await resp.json();
+    if (data.reply_html) {
+      const temp = document.createElement('div');
+      temp.innerHTML = data.reply_html;
+      const text = temp.textContent.substring(0, 300);
+      body.innerHTML = `<div style="color:#f59e0b;font-weight:600;margin-bottom:4px;">📣 广告合作</div><div style="color:#e2e8f0;font-size:10px;line-height:1.5;max-height:60px;overflow-y:auto;">${text}</div><div class="btn-group" style="margin-top:4px;"><button class="action-btn" onclick="sendCommand('/advertise')">查看详情</button><button class="action-btn" onclick="sendCommand('/wallet')">钱包</button></div>`;
+    } else { body.innerHTML = '<span style="color:#64748b;">暂无数据</span>'; }
+  } catch(e) { body.innerHTML = '<span style="color:#ef4444;">加载失败</span>'; }
 }
 
 function hotKwSearch(kw) { sendCommand(kw); }
@@ -521,19 +790,178 @@ async function refreshAllModules() {
   modules.forEach(m => { if (!m.visible) return; const el = document.querySelector(`.module-slot[data-id="${m.id}"]`); if (el) loadModuleContent(m, el); });
 }
 
+// ===== 模板管理 =====
+
+async function loadTemplates() {
+  const container = document.getElementById('templateList');
+  try {
+    const resp = await fetch('/api/demo/templates');
+    const data = await resp.json();
+    if (!data.ok || !data.templates || data.templates.length === 0) {
+      container.innerHTML = '<div class="template-empty">暂无模板，保存当前布局即可创建</div>';
+      return;
+    }
+    let html = '';
+    for (const t of data.templates) {
+      const modCount = (t.modules || []).length;
+      html += `<div class="template-item" id="tmpl-${t.id}">
+        <div style="flex:1;min-width:0;">
+          <div class="tmpl-name">${escapeHtml(t.name || '未命名模板')}</div>
+          <div class="tmpl-meta">${modCount} 个模块 · ${t.created_at || ''}</div>
+        </div>
+        <div class="tmpl-btns">
+          <button class="btn btn-sm btn-success" onclick="applyTemplate(${t.id})" title="应用到当前布局">应用</button>
+          <button class="btn btn-sm" style="background:#ef4444;color:#fff;" onclick="deleteTemplate(${t.id}, this)" title="删除模板">删除</button>
+        </div>
+      </div>`;
+    }
+    container.innerHTML = html;
+  } catch(e) {
+    container.innerHTML = '<div class="template-empty" style="color:#ef4444;">加载失败</div>';
+  }
+}
+
+function refreshTemplates() { loadTemplates(); toast('已刷新模板列表', 'info'); }
+
+function showSaveTemplateModal() {
+  document.getElementById('templateNameInput').value = '';
+  document.getElementById('saveTemplateModal').style.display = 'flex';
+  setTimeout(() => document.getElementById('templateNameInput').focus(), 100);
+}
+function closeSaveTemplateModal() { document.getElementById('saveTemplateModal').style.display = 'none'; }
+
+async function saveTemplate() {
+  const name = document.getElementById('templateNameInput').value.trim();
+  if (!name) { toast('请输入模板名称', 'err'); return; }
+  const btn = event.target;
+  btn.disabled = true; btn.textContent = '保存中...';
+  try {
+    const resp = await fetch('/api/demo/templates', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, modules, columns: layoutColumns }),
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      closeSaveTemplateModal();
+      await loadTemplates();
+      toast(`模板「${name}」已保存`, 'ok');
+    } else {
+      toast(data.error || '保存失败', 'err');
+    }
+  } catch(e) { toast('网络错误', 'err'); }
+  finally { btn.disabled = false; btn.textContent = '保存模板'; }
+}
+
+function applyTemplate(tid) {
+  pendingApplyId = tid;
+  document.getElementById('applyTemplateModal').style.display = 'flex';
+}
+function closeApplyTemplateModal() {
+  pendingApplyId = null;
+  document.getElementById('applyTemplateModal').style.display = 'none';
+}
+async function confirmApplyTemplate() {
+  if (!pendingApplyId) return;
+  const btn = document.getElementById('confirmApplyBtn');
+  btn.disabled = true; btn.textContent = '应用中...';
+  try {
+    const resp = await fetch(`/api/demo/apply_template/${pendingApplyId}`, { method: 'POST' });
+    const data = await resp.json();
+    if (data.ok) {
+      modules = data.modules;
+      layoutColumns = data.columns;
+      moduleCounter = modules.length;
+      renderModules();
+      saveLayout();
+      await loadTemplates();
+      closeApplyTemplateModal();
+      toast(`已应用模板「${data.name}」`, 'ok');
+    } else {
+      toast(data.error || '应用失败', 'err');
+    }
+  } catch(e) { toast('网络错误', 'err'); }
+  finally { btn.disabled = false; btn.textContent = '确认应用'; }
+}
+
+async function deleteTemplate(tid, btnEl) {
+  if (!confirm('确认删除此模板？')) return;
+  const item = document.getElementById(`tmpl-${tid}`);
+  if (item) { item.classList.add('slide-out'); setTimeout(() => item.remove(), 150); }
+  try {
+    const resp = await fetch(`/api/demo/templates/${tid}`, { method: 'DELETE' });
+    const data = await resp.json();
+    if (data.ok) {
+      await loadTemplates();
+      toast('模板已删除', 'ok');
+    } else {
+      toast(data.error || '删除失败', 'err');
+      if (item) { item.classList.remove('slide-out'); item.classList.add('slide-in'); }
+    }
+  } catch(e) {
+    toast('网络错误', 'err');
+    if (item) { item.classList.remove('slide-out'); item.classList.add('slide-in'); }
+  }
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+// ===== 推送 =====
+
 async function pushToBot() {
   const btn = document.getElementById('pushBtn');
-  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> 推送中...';
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> 保存中...';
+  // 第一步：确保布局已保存到服务器
+  try {
+    await fetch('/api/demo/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ layout: { modules, columns: layoutColumns } }),
+    });
+  } catch(e) { console.error('保存失败', e); }
+  // 第二步：推送到管理员Telegram
   const layoutSnapshot = { modules: modules.map(m => ({ type: m.type, top: m.top, left: m.left, w: m.w, h: m.h, visible: m.visible })), columns: layoutColumns, user_id: currentUser.id, timestamp: new Date().toISOString() };
+  btn.innerHTML = '<span class="spinner"></span> 推送中...';
   try {
     const resp = await fetch('/api/bot/push_demo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ layout: layoutSnapshot }) });
     const data = await resp.json();
     const resultEl = document.getElementById('pushResult');
     const statusEl = document.getElementById('pushStatus');
-    if (data.ok) { statusEl.innerHTML = '<span style="color:#10b981;">✅ 推送成功！</span>'; resultEl.innerHTML = data.results?.map(r => `<div style="margin-bottom:4px;">${r}</div>`).join('') || '已成功推送'; addPushLog('✅ 推送成功', data); toast('推送到Bot成功！请查看Telegram消息', 'ok'); }
-    else { statusEl.innerHTML = '<span style="color:#ef4444;">❌ 推送失败</span>'; resultEl.innerHTML = `<div style="color:#ef4444;">${data.error || '未知错误'}</div>`; addPushLog('❌ 推送失败', data); toast('推送失败，请检查配置', 'err'); }
-  } catch(e) { document.getElementById('pushStatus').innerHTML = '<span style="color:#ef4444;">❌ 网络错误</span>'; document.getElementById('pushResult').innerHTML = `<div style="color:#ef4444;">${e.message}</div>`; addPushLog('❌ 网络错误', e); toast('网络错误，请检查服务', 'err'); }
-  finally { btn.disabled = false; btn.innerHTML = '🚀 一键推送到Bot'; document.getElementById('pushModal').style.display = 'flex'; }
+    if (data.ok) {
+      statusEl.innerHTML = '<span style="color:#10b981;">✅ 布局已保存并推送成功！</span>';
+      resultEl.innerHTML = `
+        <div style="margin-bottom:8px;">${data.results?.map(r => `<div style="margin-bottom:4px;">${r}</div>`).join('') || '已推送'}</div>
+        <div style="color:#94a3b8;font-size:11px;margin-bottom:10px;">📦 已保存 ${modules.length} 个模块到服务器</div>
+        <div style="background:#0e1621;border-radius:8px;padding:10px;margin-bottom:8px;">
+          <div style="color:#2AABEE;font-size:12px;font-weight:600;margin-bottom:6px;">📱 查看效果的方法：</div>
+          <div style="color:#e2e8f0;font-size:11px;line-height:1.8;">
+            1️⃣ <b>网页预览</b>：打开 <a href="/" target="_blank" style="color:#10b981;">http://127.0.0.1:8001/</a> 然后点 <b>🚀 /start</b> 按钮<br>
+            2️⃣ <b>Telegram机器人</b>：在机器人里发送 <code style="background:#1e293b;padding:1px 4px;border-radius:3px;">/start</code><br>
+            3️⃣ <b>管理员通知</b>：检查 Telegram 是否收到推送消息
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:8px;">
+          <a href="/" target="_blank" style="flex:1;text-align:center;padding:8px;background:#2563eb;color:#fff;border-radius:6px;text-decoration:none;font-size:12px;">🔍 打开Bot预览</a>
+          <button onclick="closePushModal();location.reload();" style="flex:1;padding:8px;background:#334155;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;">🔄 刷新设计器</button>
+        </div>`;
+      addPushLog('✅ 推送成功', { module_count: modules.length });
+      toast('✅ 保存成功！请按上述方法查看效果', 'ok');
+    } else {
+      statusEl.innerHTML = '<span style="color:#ef4444;">❌ 推送失败</span>';
+      resultEl.innerHTML = `<div style="color:#ef4444;">${data.error || '未知错误'}</div><div style="color:#94a3b8;font-size:11px;margin-top:8px;">💡 布局已保存到服务器，Bot预览页仍可查看效果</div>`;
+      addPushLog('❌ 推送失败', data);
+      toast('布局已保存，但推送通知失败', 'info');
+    }
+  } catch(e) {
+    document.getElementById('pushStatus').innerHTML = '<span style="color:#ef4444;">❌ 网络错误</span>';
+    document.getElementById('pushResult').innerHTML = `<div style="color:#ef4444;">${e.message}</div><div style="color:#94a3b8;font-size:11px;margin-top:8px;">💡 布局已保存到服务器，请查看Bot预览页</div>`;
+    addPushLog('❌ 网络错误', e);
+    toast('布局已保存，请查看预览页', 'info');
+  } finally { btn.disabled = false; btn.innerHTML = '🚀 一键推送到Bot'; document.getElementById('pushModal').style.display = 'flex'; }
 }
 
 function closePushModal() { document.getElementById('pushModal').style.display = 'none'; }

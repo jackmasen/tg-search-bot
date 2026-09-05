@@ -6009,8 +6009,119 @@ async def _verify_campaign_owner(tg_user_id: int, campaign_id: int) -> bool:
         return row is not None
 
 
+async def _render_bot_module(mtype, u, balance, featured_ads, hot_keywords_by_cat):
+    """根据模块类型渲染 Bot 端 HTML 内容和操作按钮"""
+    actions = []
+    html_part = ""
+    if mtype == "search_box":
+        html_part = '<div class="demo-search-box" style="margin:6px 0;"><input type="text" placeholder="🔍 输入关键词搜索..." style="width:100%;padding:6px 10px;border-radius:8px;border:1px solid #2b5278;background:#0e1621;color:#fff;font-size:12px;outline:none;"></div>'
+    elif mtype == "result_list":
+        html_part = '<div style="color:#64748b;font-size:10px;margin:4px 0;">📋 输入关键词后将显示搜索结果</div>'
+    elif mtype == "hot_keywords":
+        kw_limit = Config.HOT_KEYWORD_PER_CATEGORY_LIMIT
+        if hot_keywords_by_cat:
+            html_part = '<div class="hot-kw-section mt-2"><div class="text-xs text-sky-300 mb-1 font-semibold">🚀 热门搜索</div>'
+            for cat_name, cat_data in hot_keywords_by_cat.items():
+                icon = cat_data.get("icon", "🔍")
+                keywords = cat_data.get("keywords", [])
+                if keywords:
+                    tags_html = ''
+                    for i, kw in enumerate(keywords[:kw_limit]):
+                        kw_text = html.escape(kw.get("keyword", ""))
+                        escaped_kw = html.escape(kw_text, quote=True)
+                        sep = ' <span class="hot-kw-sep">|</span> ' if i > 0 else ''
+                        tags_html += f'{sep}<a class="hot-kw-tag" href="#" onclick="runCmd(\'{escaped_kw}\')">{kw_text}</a>'
+                    html_part += f'<div class="hot-kw-row"><span class="hot-kw-label">{icon} {html.escape(cat_name)}</span>{tags_html}</div>'
+            html_part += '</div>'
+    elif mtype == "ads" or mtype == "channel_promo":
+        if featured_ads:
+            title_text = "📢 频道推广" if mtype == "channel_promo" else "📣 今日热门推荐"
+            html_part = f'<div class="mt-3"><div class="text-xs text-sky-300 mb-2 font-semibold">{title_text}（点击标题直达）</div>'
+            for ad in featured_ads[:8]:
+                title = html.escape(ad.get('title', ''))
+                desc = html.escape(ad.get('description', ''))
+                url = html.escape(ad.get('target_url', '#'))
+                desc_short = desc[:30] + '…' if len(desc) > 30 else desc
+                ad_row = f'{title}  ·  {desc_short}' if desc else title
+                if url and url != '#':
+                    actions.append({"text": f"👉 {title[:10]}", "url": url})
+                html_part += f'<div class="ad-row">{ad_row}</div>'
+            html_part += '</div>'
+    elif mtype == "wallet":
+        html_part = f'<div style="margin:6px 0;"><div style="color:#f59e0b;font-weight:600;font-size:11px;">💰 钱包余额</div><div style="font-size:18px;font-weight:700;color:#fbbf24;">${balance:.2f} U</div><div style="color:#94a3b8;font-size:9px;">USDT (TRC20)</div></div>'
+        actions.append({"text": "💰 /wallet 钱包", "cmd": "/wallet"})
+    elif mtype == "stats":
+        html_part = f'<div style="margin:6px 0;"><div style="color:#f59e0b;font-weight:600;font-size:11px;">📊 账户统计</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:4px;"><div style="background:#0f172a;border-radius:6px;padding:6px;text-align:center;"><div style="font-size:14px;font-weight:700;color:#2AABEE;">${balance:.2f}</div><div style="font-size:9px;color:#94a3b8;">钱包余额</div></div><div style="background:#0f172a;border-radius:6px;padding:6px;text-align:center;"><div style="font-size:14px;font-weight:700;color:#10b981;">5</div><div style="font-size:9px;color:#94a3b8;">今日剩余</div></div></div></div>'
+        actions.append({"text": "📊 /stats 统计", "cmd": "/stats"})
+    elif mtype == "channels":
+        html_part = '<div style="margin:6px 0;"><div style="color:#2AABEE;font-weight:600;font-size:11px;">📺 频道管理</div><div style="color:#94a3b8;font-size:10px;">管理推荐频道、查看统计数据</div></div>'
+        actions.append({"text": "📺 /channels 频道", "cmd": "/channels"})
+    elif mtype == "advertise":
+        html_part = '<div style="margin:6px 0;"><div style="color:#f59e0b;font-weight:600;font-size:11px;">📣 广告合作</div><div style="color:#94a3b8;font-size:10px;">发布广告、精准投放、ROI追踪</div></div>'
+        actions.append({"text": "📣 /advertise 合作", "cmd": "/advertise"})
+    elif mtype == "quick_actions":
+        actions.extend([
+            {"text": "🏠 /start 首页", "cmd": "/start"},
+            {"text": "📊 /stats 统计", "cmd": "/stats"},
+            {"text": "💰 /wallet 钱包", "cmd": "/wallet"},
+            {"text": "💵 /recharge 充值", "cmd": "/recharge"},
+        ])
+    elif mtype == "custom_html":
+        html_part = ''
+    return html_part, actions
+
+
 async def _build_start_html(u, balance, featured_ads, hot_keywords_by_cat):
-    """构建 /start 命令的 HTML 响应内容"""
+    """构建 /start 命令的 HTML 响应内容（支持演示布局）"""
+    actions = []
+
+    # 尝试加载演示设计器保存的布局
+    demo_layout = None
+    try:
+        from app.admin.system_settings_manager import load_all_settings_from_db
+        async with get_db() as db:
+            settings = await load_all_settings_from_db(db)
+        layout_str = settings.get("demo_layout")
+        if layout_str:
+            demo_layout = _json.loads(layout_str)
+    except Exception:
+        demo_layout = None
+
+    # 如果有保存的演示布局，按布局渲染模块
+    if demo_layout and isinstance(demo_layout, dict) and demo_layout.get("modules"):
+        layout_modules = demo_layout.get("modules", [])
+        parts = []
+        # 欢迎语 + 身份信息（始终显示）
+        parts.append(f"""👋 <b>欢迎使用 TG搜索Pro Bot</b><br>
+                <div class="text-xs text-gray-400 mb-2">
+                    👤 身份：@{u.get('username','游客')} · 💰 余额：<b class="text-yellow-300">${balance:.2f} U</b> ·
+                    📊 免费搜索：<b>5</b> 次/天
+                </div>""")
+        for m in layout_modules:
+            if not isinstance(m, dict) or not m.get("visible", True):
+                continue
+            mtype = m.get("type", "")
+            # 兼容旧版模块类型
+            legacy_map = {"title": "custom_html", "search": "search_box", "hot": "hot_keywords", "ad": "ads", "channel": "channels"}
+            mtype = legacy_map.get(mtype, mtype)
+            html_part, m_actions = await _render_bot_module(mtype, u, balance, featured_ads, hot_keywords_by_cat)
+            if html_part:
+                parts.append(html_part)
+            if m_actions:
+                actions.extend(m_actions)
+        reply_html = "\n".join(parts)
+        # 确保至少有基础操作按钮
+        if not actions:
+            actions = [
+                {"text": "📊 /stats 数据统计", "cmd": "/stats"},
+                {"text": "💰 /wallet 钱包", "cmd": "/wallet"},
+                {"text": "📺 /channels 频道管理", "cmd": "/channels"},
+                {"text": "📣 /ads 广告管理", "cmd": "/ads"},
+                {"text": "📣 /advertise 广告合作", "cmd": "/advertise"},
+            ]
+        return reply_html, actions
+
+    # 默认布局（无保存的演示布局时使用）
     ad_limit = Config.FEATURED_AD_LIMIT
     featured_ads_html = ""
     if featured_ads:
@@ -6110,6 +6221,7 @@ async def api_bot_command(request: Request):
         reply_html = ""
         actions = []
         recharge_action = None
+        hot_keywords = []
 
         if cmd == "/start":
             u = await wallet_manager.get_or_create_user(tg_user_id)
@@ -7235,6 +7347,21 @@ async def update_demo_config(request: Request):
         return JSONResponse({"ok": False, "error": str(e)[:200]})
 
 
+@app.get("/api/demo/featured_channels")
+async def get_featured_channels():
+    """获取推荐频道列表（is_featured=1），用于演示设计器的「频道推广」模块"""
+    try:
+        async with get_db() as db:
+            cur = await db.execute(
+                "SELECT id, title, username, member_count, category, description, target_url, is_featured, sort_order "
+                "FROM channels WHERE is_featured = 1 ORDER BY sort_order ASC, id ASC LIMIT 20"
+            )
+            rows = [dict(r) for r in await cur.fetchall()]
+        return JSONResponse({"ok": True, "channels": rows})
+    except Exception as e:
+        return JSONResponse({"ok": False, "channels": [], "error": str(e)[:200]})
+
+
 @app.post("/api/bot/push_demo")
 async def push_demo_to_bot(request: Request):
     """一键推送到Bot：将演示布局配置序列化后推送至管理员Telegram"""
@@ -7270,6 +7397,8 @@ async def push_demo_to_bot(request: Request):
                 "search_box": "🔍 搜索框", "result_list": "📋 搜索结果",
                 "hot_keywords": "⭐ 热门搜索", "ads": "📣 广告卡片",
                 "wallet": "💰 钱包余额", "stats": "📊 数据统计",
+                "channels": "📺 频道管理", "channel_promo": "📢 频道推广",
+                "advertise": "📣 广告合作入口",
                 "quick_actions": "⚡ 快捷操作", "custom_html": "📝 自定义HTML",
             }
             module_names.append(name_map.get(t, t))
@@ -7311,6 +7440,90 @@ async def push_demo_to_bot(request: Request):
     except Exception as e:
         logger.warning(f"push_demo_to_bot 异常: {str(e)[:200]}")
         return JSONResponse({"ok": False, "error": f"服务器内部错误：{str(e)[:100]}"}, status_code=500)
+
+
+# ===== 演示模板管理 API =====
+
+@app.get("/api/demo/templates")
+async def get_demo_templates():
+    """获取所有演示布局模板列表"""
+    try:
+        async with get_db() as db:
+            cur = await db.execute("SELECT setting_key, setting_value FROM system_settings WHERE setting_key LIKE 'demo_template_%' ORDER BY setting_key ASC")
+            rows = [dict(r) for r in await cur.fetchall()]
+        templates = []
+        for row in rows:
+            try:
+                t = _json.loads(row["setting_value"])
+                templates.append(t)
+            except Exception:
+                pass
+        return JSONResponse({"ok": True, "templates": templates})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)[:200]})
+
+
+@app.post("/api/demo/templates")
+async def save_demo_template(request: Request):
+    """保存演示布局为模板"""
+    try:
+        p = await request.json()
+        name = (p.get("name") or "未命名模板").strip()
+        modules = p.get("modules") or []
+        columns = p.get("columns") or 1
+        if not name or not isinstance(modules, list):
+            return JSONResponse({"ok": False, "error": "模板名称和模块数据不能为空"}, status_code=400)
+        from app.admin.system_settings_manager import upsert_setting
+        import time as _time
+        tid = int(_time.time() * 1000)
+        key = f"demo_template_{tid}"
+        template_data = {
+            "id": tid,
+            "name": name,
+            "modules": modules,
+            "columns": columns,
+            "created_at": _time.strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        async with get_db() as db:
+            await upsert_setting(db, key, _json.dumps(template_data, ensure_ascii=False))
+        return JSONResponse({"ok": True, "id": tid, "name": name, "message": "模板已保存"})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)[:200]})
+
+
+@app.delete("/api/demo/templates/{tid}")
+async def delete_demo_template(tid: int):
+    """删除演示布局模板"""
+    try:
+        key = f"demo_template_{tid}"
+        from app.admin.system_settings_manager import reset_setting
+        async with get_db() as db:
+            await reset_setting(db, key)
+        return JSONResponse({"ok": True, "message": "模板已删除"})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)[:200]})
+
+
+@app.post("/api/demo/apply_template/{tid}")
+async def apply_demo_template(tid: int):
+    """应用模板到当前布局"""
+    try:
+        key = f"demo_template_{tid}"
+        from app.admin.system_settings_manager import upsert_setting
+        async with get_db() as db:
+            cur = await db.execute("SELECT setting_value FROM system_settings WHERE setting_key=?", (key,))
+            row = await cur.fetchone()
+        if not row:
+            return JSONResponse({"ok": False, "error": "模板不存在"}, status_code=404)
+        template = _json.loads(row["setting_value"])
+        modules = template.get("modules", [])
+        columns = template.get("columns", 1)
+        layout_json = _json.dumps({"modules": modules, "columns": columns}, ensure_ascii=False)
+        async with get_db() as db:
+            await upsert_setting(db, "demo_layout", layout_json)
+        return JSONResponse({"ok": True, "modules": modules, "columns": columns, "name": template.get("name", "")})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)[:200]})
 
 
 if __name__ == "__main__":
