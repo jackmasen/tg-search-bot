@@ -29,6 +29,7 @@ from app.bot.handlers import (
     ai_search_command,
     ai_command,
     kw_callback_handler,
+    search_callback_handler,
 )
 
 
