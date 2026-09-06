@@ -6009,10 +6009,11 @@ async def _verify_campaign_owner(tg_user_id: int, campaign_id: int) -> bool:
         return row is not None
 
 
-async def _render_bot_module(mtype, u, balance, featured_ads, hot_keywords_by_cat):
+async def _render_bot_module(mtype, u, balance, featured_ads, hot_keywords_by_cat, channel_promo_ads=None):
     """根据模块类型渲染 Bot 端 HTML 内容和操作按钮"""
     actions = []
     html_part = ""
+    promo_ads = channel_promo_ads if channel_promo_ads is not None else featured_ads
     if mtype == "search_box":
         html_part = "🔍 直接发送关键词搜索，或点击下方按钮开始"
         actions.append({"text": "🔍 开始搜索", "callback": "__search__"})
@@ -6029,7 +6030,7 @@ async def _render_bot_module(mtype, u, balance, featured_ads, hot_keywords_by_ca
                     kw_texts = [html.escape(kw.get("keyword", "")) for kw in keywords[:kw_limit]]
                     lines.append(f"{icon} {html.escape(cat_name)}: {', '.join(kw_texts)}")
             if lines:
-                html_part = "🚀 热门搜索: " + " | ".join(lines)
+                html_part = "🚀 热门搜索\n" + "\n".join(lines)
                 for cat_name, cat_data in hot_keywords_by_cat.items():
                     icon = cat_data.get("icon", "🔍")
                     keywords = cat_data.get("keywords", [])
@@ -6044,10 +6045,9 @@ async def _render_bot_module(mtype, u, balance, featured_ads, hot_keywords_by_ca
             html_part = f"🚀 热门搜索: {', '.join(default_kws)}"
             for kw in default_kws:
                 actions.append({"text": f"🔍 {kw}", "callback": f"__kw__{kw}"})
-    elif mtype == "ads" or mtype == "channel_promo":
+    elif mtype == "ads":
         if featured_ads:
-            title_text = "📢 频道推广" if mtype == "channel_promo" else "📣 今日热门推荐"
-            html_part = f'<div class="mt-3"><div class="text-xs text-sky-300 mb-2 font-semibold">{title_text}（点击标题直达）</div>'
+            html_part = "📣 今日热门推荐（点击标题直达）"
             for ad in featured_ads[:8]:
                 title = html.escape(ad.get('title', ''))
                 desc = html.escape(ad.get('description', ''))
@@ -6056,19 +6056,30 @@ async def _render_bot_module(mtype, u, balance, featured_ads, hot_keywords_by_ca
                 ad_row = f'{title}  ·  {desc_short}' if desc else title
                 if url and url != '#':
                     actions.append({"text": f"👉 {title[:10]}", "url": url})
-                html_part += f'<div class="ad-row">{ad_row}</div>'
-            html_part += '</div>'
+                html_part += f"\n{ad_row}"
+    elif mtype == "channel_promo":
+        if promo_ads:
+            html_part = "📢 推广频道（点击加入）"
+            for ad in promo_ads[:6]:
+                title = html.escape(ad.get('title', ''))
+                members = ad.get('member_count', 0)
+                url = html.escape(ad.get('target_url', '#'))
+                if url and url != '#':
+                    actions.append({"text": f"👉 {title[:10]}", "url": url})
+                html_part += f"\n🔗 {title}" + (f" · 👥{members}" if members else "")
+        else:
+            html_part = "📢 推广频道\n\n💡 点击 /channels 查看全部频道列表"
     elif mtype == "wallet":
-        html_part = f'<div style="margin:6px 0;"><div style="color:#f59e0b;font-weight:600;font-size:11px;">💰 钱包余额</div><div style="font-size:18px;font-weight:700;color:#fbbf24;">${balance:.2f} U</div><div style="color:#94a3b8;font-size:9px;">USDT (TRC20)</div></div>'
+        html_part = f"💰 钱包余额: ${balance:.2f} U (USDT TRC20)"
         actions.append({"text": "💰 /wallet 钱包", "cmd": "/wallet"})
     elif mtype == "stats":
-        html_part = f'<div style="margin:6px 0;"><div style="color:#f59e0b;font-weight:600;font-size:11px;">📊 账户统计</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:4px;"><div style="background:#0f172a;border-radius:6px;padding:6px;text-align:center;"><div style="font-size:14px;font-weight:700;color:#2AABEE;">${balance:.2f}</div><div style="font-size:9px;color:#94a3b8;">钱包余额</div></div><div style="background:#0f172a;border-radius:6px;padding:6px;text-align:center;"><div style="font-size:14px;font-weight:700;color:#10b981;">5</div><div style="font-size:9px;color:#94a3b8;">今日剩余</div></div></div></div>'
+        html_part = "📊 账户统计 — 点击查看详细数据"
         actions.append({"text": "📊 /stats 统计", "cmd": "/stats"})
     elif mtype == "channels":
-        html_part = '<div style="margin:6px 0;"><div style="color:#2AABEE;font-weight:600;font-size:11px;">📺 频道管理</div><div style="color:#94a3b8;font-size:10px;">管理推荐频道、查看统计数据</div></div>'
+        html_part = "📺 频道管理 — 查看频道列表、统计数据"
         actions.append({"text": "📺 /channels 频道", "cmd": "/channels"})
     elif mtype == "advertise":
-        html_part = '<div style="margin:6px 0;"><div style="color:#f59e0b;font-weight:600;font-size:11px;">📣 广告合作</div><div style="color:#94a3b8;font-size:10px;">发布广告、精准投放、ROI追踪</div></div>'
+        html_part = "📣 广告合作 — 发布广告、精准投放、ROI追踪"
         actions.append({"text": "📣 /advertise 合作", "cmd": "/advertise"})
     elif mtype == "quick_actions":
         actions.extend([
@@ -6076,6 +6087,8 @@ async def _render_bot_module(mtype, u, balance, featured_ads, hot_keywords_by_ca
             {"text": "📊 /stats 统计", "cmd": "/stats"},
             {"text": "💰 /wallet 钱包", "cmd": "/wallet"},
             {"text": "💵 /recharge 充值", "cmd": "/recharge"},
+            {"text": "📺 /channels 频道", "cmd": "/channels"},
+            {"text": "📣 /advertise 合作", "cmd": "/advertise"},
         ])
     elif mtype == "custom_html":
         html_part = ''
@@ -6121,6 +6134,13 @@ async def _build_start_html(u, balance, featured_ads, hot_keywords_by_cat):
             if m_actions:
                 actions.extend(m_actions)
         reply_html = "\n".join(parts)
+        # 底部快捷菜单文本
+        bottom_menu = (
+            "\n━━━━━━━━━━━━━━\n"
+            "💰 /wallet 钱包　📊 /stats 统计　📺 /channels 频道\n"
+            "📣 /advertise 广告合作　💵 /recharge 充值"
+        )
+        reply_html += bottom_menu
         # 始终包含基础快捷操作按钮（合并去重）
         default_shortcuts = [
             {"text": "📊 /stats 数据统计", "cmd": "/stats"},
