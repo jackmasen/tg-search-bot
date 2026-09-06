@@ -75,10 +75,12 @@ def _actions_to_keyboard(actions: list) -> InlineKeyboardMarkup:
         text = str(a.get("text", ""))
         cmd = str(a.get("cmd", ""))
         url = str(a.get("url", ""))
+        callback = str(a.get("callback", ""))
         if text and url:
             rows.append([InlineKeyboardButton(text, url=url)])
-        elif text and cmd:
-            rows.append([InlineKeyboardButton(text, callback_data=cmd)])
+        elif text and (cmd or callback):
+            data = callback or cmd
+            rows.append([InlineKeyboardButton(text, callback_data=data)])
     if not rows:
         return None
     return InlineKeyboardMarkup(rows)
@@ -463,6 +465,22 @@ async def search_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     keyboard = _actions_to_keyboard(actions)
     await update.message.reply_text(reply_md, parse_mode="Markdown", reply_markup=keyboard)
+
+
+async def search_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """处理搜索按钮点击 — 提示用户输入关键词"""
+    cb = update.callback_query
+    await cb.answer()
+    data = cb.data or ""
+    if not data == "__search__":
+        return
+    user_id = cb.from_user.id
+    await cb.edit_message_text(
+        "🔍 请输入关键词开始搜索\n\n"
+        "直接发送关键词即可，例如：\n"
+        "`比特币` `AI` `空投` `Python`\n\n"
+        "💡 也可点击下方热搜词直接搜索："
+    )
 
 
 async def kw_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):

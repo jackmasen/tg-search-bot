@@ -6014,25 +6014,36 @@ async def _render_bot_module(mtype, u, balance, featured_ads, hot_keywords_by_ca
     actions = []
     html_part = ""
     if mtype == "search_box":
-        html_part = '<div class="demo-search-box" style="margin:6px 0;"><input type="text" placeholder="🔍 输入关键词搜索..." style="width:100%;padding:6px 10px;border-radius:8px;border:1px solid #2b5278;background:#0e1621;color:#fff;font-size:12px;outline:none;"></div>'
+        html_part = "🔍 直接发送关键词搜索，或点击下方按钮开始"
+        actions.append({"text": "🔍 开始搜索", "callback": "__search__"})
     elif mtype == "result_list":
-        html_part = '<div style="color:#64748b;font-size:10px;margin:4px 0;">📋 输入关键词后将显示搜索结果</div>'
+        html_part = "📋 搜索结果区（发送关键词后将显示）"
     elif mtype == "hot_keywords":
         kw_limit = Config.HOT_KEYWORD_PER_CATEGORY_LIMIT
         if hot_keywords_by_cat:
-            html_part = '<div class="hot-kw-section mt-2"><div class="text-xs text-sky-300 mb-1 font-semibold">🚀 热门搜索</div>'
+            lines = []
             for cat_name, cat_data in hot_keywords_by_cat.items():
                 icon = cat_data.get("icon", "🔍")
                 keywords = cat_data.get("keywords", [])
                 if keywords:
-                    tags_html = ''
-                    for i, kw in enumerate(keywords[:kw_limit]):
-                        kw_text = html.escape(kw.get("keyword", ""))
-                        escaped_kw = html.escape(kw_text, quote=True)
-                        sep = ' <span class="hot-kw-sep">|</span> ' if i > 0 else ''
-                        tags_html += f'{sep}<a class="hot-kw-tag" href="#" onclick="runCmd(\'{escaped_kw}\')">{kw_text}</a>'
-                    html_part += f'<div class="hot-kw-row"><span class="hot-kw-label">{icon} {html.escape(cat_name)}</span>{tags_html}</div>'
-            html_part += '</div>'
+                    kw_texts = [html.escape(kw.get("keyword", "")) for kw in keywords[:kw_limit]]
+                    lines.append(f"{icon} {html.escape(cat_name)}: {', '.join(kw_texts)}")
+            if lines:
+                html_part = "🚀 热门搜索: " + " | ".join(lines)
+                for cat_name, cat_data in hot_keywords_by_cat.items():
+                    icon = cat_data.get("icon", "🔍")
+                    keywords = cat_data.get("keywords", [])
+                    for kw in keywords[:kw_limit]:
+                        kw_text = kw.get("keyword", "")
+                        if kw_text:
+                            actions.append({"text": f"🔍 {kw_text}", "callback": f"__kw__{kw_text}"})
+            else:
+                html_part = "🚀 暂无热门搜索关键词"
+        else:
+            default_kws = ["比特币", "以太坊", "AI", "空投"]
+            html_part = f"🚀 热门搜索: {', '.join(default_kws)}"
+            for kw in default_kws:
+                actions.append({"text": f"🔍 {kw}", "callback": f"__kw__{kw}"})
     elif mtype == "ads" or mtype == "channel_promo":
         if featured_ads:
             title_text = "📢 频道推广" if mtype == "channel_promo" else "📣 今日热门推荐"
@@ -7385,6 +7396,13 @@ async def push_demo_to_bot(request: Request):
         layout = p.get("layout", {})
         if not isinstance(layout, dict):
             layout = {}
+        # 确保布局先保存到数据库（防御性：即使前端config保存失败也能生效）
+        try:
+            from app.admin.system_settings_manager import upsert_setting
+            async with get_db() as db:
+                await upsert_setting(db, "demo_layout", _json.dumps(layout, ensure_ascii=False))
+        except Exception as _e:
+            logger.warning(f"push_demo 保存布局失败: {_e}")
         modules = layout.get("modules", [])
         if not isinstance(modules, list):
             modules = []

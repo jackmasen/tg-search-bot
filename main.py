@@ -124,6 +124,7 @@ def main():
     application.add_handler(CommandHandler("ai", ai_command))
 
     # 注册回调查询处理
+    application.add_handler(CallbackQueryHandler(search_callback_handler))
     application.add_handler(CallbackQueryHandler(kw_callback_handler))
 
     # 注册文本搜索（非命令消息）
