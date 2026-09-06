@@ -6128,7 +6128,7 @@ async def _build_start_html(u, balance, featured_ads, hot_keywords_by_cat):
             # 兼容旧版模块类型
             legacy_map = {"title": "custom_html", "search": "search_box", "hot": "hot_keywords", "ad": "ads", "channel": "channels"}
             mtype = legacy_map.get(mtype, mtype)
-            html_part, m_actions = await _render_bot_module(mtype, u, balance, featured_ads, hot_keywords_by_cat)
+            html_part, m_actions = await _render_bot_module(mtype, u, balance, featured_ads, hot_keywords_by_cat, channel_promo_ads=[])
             if html_part:
                 parts.append(html_part)
             if m_actions:
@@ -6220,7 +6220,11 @@ async def _build_start_html(u, balance, featured_ads, hot_keywords_by_cat):
                 </div>
                 {featured_ads_html}
                 {hot_kw_html}
-                <div class="mt-3 text-xs text-gray-400">👇 选择操作：</div>"""
+                <div class="mt-3 text-xs text-gray-400">👇 选择操作：</div>
+                <div class="mt-3 text-xs border-t border-gray-700 pt-2">
+                    💰 /wallet 钱包　📊 /stats 统计　📺 /channels 频道<br>
+                    📣 /advertise 广告合作　💵 /recharge 充值
+                </div>"""
 
     actions = [
         {"text": "📊 /stats 数据统计", "cmd": "/stats"},
