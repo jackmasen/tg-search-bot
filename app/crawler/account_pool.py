@@ -99,7 +99,12 @@ class AccountPool:
                         if proxy_protocol == "socks5":
                             proxy = (socks.SOCKS5, proxy_host, proxy_port)
                         elif proxy_protocol in ("http", "http_connect"):
-                            proxy = (socks.HTTP, proxy_host, proxy_port)
+                            proxy_user = acc.get("proxy_username")
+                            proxy_pwd = acc.get("proxy_password")
+                            if proxy_user and proxy_pwd:
+                                proxy = (socks.HTTP, proxy_host, proxy_port, proxy_user, proxy_pwd)
+                            else:
+                                proxy = (socks.HTTP, proxy_host, proxy_port)
                         else:
                             proxy = (socks.SOCKS5, proxy_host, proxy_port)
                     except ImportError:
@@ -140,7 +145,8 @@ class AccountPool:
                     "SELECT a.id, a.phone, a.api_id, a.api_hash, a.session_file, "
                     "a.tg_user_id, a.tg_username, a.status, a.proxy_mode, a.proxy_protocol, "
                     "a.proxy_host, a.proxy_port, a.proxy_username, a.proxy_password, a.proxy_id, "
-                    "p.name as proxy_name, p.proxy_host as proxy_host_src, p.proxy_port as proxy_port_src "
+                    "p.name as proxy_name, p.proxy_host as proxy_host_src, p.proxy_port as proxy_port_src, "
+                    "p.proxy_username as proxy_username_src, p.proxy_password as proxy_password_src "
                     "FROM crawler_accounts a "
                     "LEFT JOIN crawler_proxies p ON a.proxy_id = p.id "
                     "WHERE a.status IN ('active', 'need_verify') "
@@ -183,8 +189,8 @@ class AccountPool:
                         "proxy_protocol": acc.get("proxy_protocol", "http"),
                         "proxy_host": proxy_host,
                         "proxy_port": proxy_port,
-                        "proxy_username": acc.get("proxy_username") or acc.get("proxy_username"),
-                        "proxy_password": acc.get("proxy_password"),
+                        "proxy_username": acc.get("proxy_username_src") or acc.get("proxy_username"),
+                        "proxy_password": acc.get("proxy_password_src") or acc.get("proxy_password"),
                         "proxy_name": acc.get("proxy_name"),
                     })
                 return accounts

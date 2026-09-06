@@ -101,7 +101,7 @@ def main():
 
     # 提前加载DB配置（在构建Application之前，确保BOT_TOKEN已就位）
     logger.info("提前加载数据库配置...")
-    asyncio.run(_load_config_from_db())
+    _load_db_config_sync()
     logger.info(f"Bot Token: {_token_display}")
 
     # 创建Bot应用
@@ -131,6 +131,19 @@ def main():
 
     # 启动Bot（polling模式）
     application.run_polling(allowed_updates=["message", "callback_query"])
+
+
+def _load_db_config_sync():
+    """同步加载DB配置（创建临时事件循环）"""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        loop.run_until_complete(_load_config_from_db())
+    finally:
+        loop.close()
+        # 重新设置一个新循环供 run_polling 使用
+        new_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(new_loop)
 
 
 if __name__ == "__main__":
