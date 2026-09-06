@@ -97,6 +97,9 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not reply_html:
         reply_html = "👋 欢迎使用 TG搜索Pro Bot！请直接发送关键词搜索或点击下方按钮操作。"
 
+    # 将前端HTML转为Telegram兼容的Markdown格式
+    reply_text = _html_to_markdown(reply_html)
+
     kw_buttons = []
     for kw in hot_keywords[:8]:
         kw_text = kw.get("keyword", "")
@@ -110,7 +113,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             keyboard = InlineKeyboardMarkup(kw_buttons)
 
-    await update.message.reply_text(reply_html, parse_mode="HTML", reply_markup=keyboard)
+    await update.message.reply_text(reply_text, parse_mode="Markdown", reply_markup=keyboard)
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):

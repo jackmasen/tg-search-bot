@@ -6110,15 +6110,18 @@ async def _build_start_html(u, balance, featured_ads, hot_keywords_by_cat):
             if m_actions:
                 actions.extend(m_actions)
         reply_html = "\n".join(parts)
-        # 确保至少有基础操作按钮
-        if not actions:
-            actions = [
-                {"text": "📊 /stats 数据统计", "cmd": "/stats"},
-                {"text": "💰 /wallet 钱包", "cmd": "/wallet"},
-                {"text": "📺 /channels 频道管理", "cmd": "/channels"},
-                {"text": "📣 /ads 广告管理", "cmd": "/ads"},
-                {"text": "📣 /advertise 广告合作", "cmd": "/advertise"},
-            ]
+        # 始终包含基础快捷操作按钮（合并去重）
+        default_shortcuts = [
+            {"text": "📊 /stats 数据统计", "cmd": "/stats"},
+            {"text": "💰 /wallet 钱包", "cmd": "/wallet"},
+            {"text": "📺 /channels 频道管理", "cmd": "/channels"},
+            {"text": "📣 /ads 广告管理", "cmd": "/ads"},
+            {"text": "📣 /advertise 广告合作", "cmd": "/advertise"},
+        ]
+        existing_cmds = {a.get("cmd") for a in actions if a.get("cmd")}
+        for ds in default_shortcuts:
+            if ds["cmd"] not in existing_cmds:
+                actions.append(ds)
         return reply_html, actions
 
     # 默认布局（无保存的演示布局时使用）
