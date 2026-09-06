@@ -111,7 +111,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = _actions_to_keyboard(actions)
     if kw_buttons:
         if keyboard:
-            keyboard.inline_keyboard.extend(kw_buttons)
+            combined = list(keyboard.inline_keyboard) + kw_buttons
+            keyboard = InlineKeyboardMarkup(combined)
         else:
             keyboard = InlineKeyboardMarkup(kw_buttons)
 
