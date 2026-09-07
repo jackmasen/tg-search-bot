@@ -67,7 +67,7 @@ def _html_to_markdown(html_text: str) -> str:
 
 
 def _actions_to_keyboard(actions: list) -> InlineKeyboardMarkup:
-    """把 API actions 列表转成 InlineKeyboardMarkup"""
+    """把 API actions 列表转成 InlineKeyboardMarkup（每个按钮一行，兼容旧版）"""
     if not actions:
         return None
     rows = []
@@ -86,6 +86,37 @@ def _actions_to_keyboard(actions: list) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(rows)
 
 
+def _keyboard_rows_to_markup(keyboard_rows: list) -> InlineKeyboardMarkup:
+    """把 API 返回的 keyboard_rows（按设计器布局分组的二维列表）转成 InlineKeyboardMarkup。
+    每个子列表代表一行按钮，行内按钮并排显示，还原用户设计的多列布局。"""
+    if not keyboard_rows:
+        return None
+    rows = []
+    for row in keyboard_rows:
+        if not isinstance(row, list):
+            continue
+        btn_row = []
+        for a in row:
+            if not isinstance(a, dict):
+                continue
+            text = str(a.get("text", ""))
+            cmd = str(a.get("cmd", ""))
+            url = str(a.get("url", ""))
+            callback = str(a.get("callback", ""))
+            if not text:
+                continue
+            if url:
+                btn_row.append(InlineKeyboardButton(text, url=url))
+            elif cmd or callback:
+                data = callback or cmd
+                btn_row.append(InlineKeyboardButton(text, callback_data=data))
+        if btn_row:
+            rows.append(btn_row)
+    if not rows:
+        return None
+    return InlineKeyboardMarkup(rows)
+
+
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """/start 命令 — 调用 /api/bot/command 获取前端同款响应"""
     user = update.effective_user
@@ -94,7 +125,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     api_data = await _call_bot_api("/start", user.id)
     reply_html = api_data.get("reply_html", "")
     actions = api_data.get("actions", [])
-    hot_keywords = api_data.get("hot_keywords", [])
+    keyboard_rows = api_data.get("keyboard_rows", [])
 
     if not reply_html:
         reply_html = "👋 欢迎使用 TG搜索Pro Bot！请直接发送关键词搜索或点击下方按钮操作。"
@@ -102,19 +133,12 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 将前端HTML转为Telegram兼容的Markdown格式
     reply_text = _html_to_markdown(reply_html)
 
-    kw_buttons = []
-    for kw in hot_keywords[:8]:
-        kw_text = kw.get("keyword", "")
-        if kw_text:
-            kw_buttons.append([InlineKeyboardButton(f"🔍 {kw_text}", callback_data=f"__kw__{kw_text}")])
-
-    keyboard = _actions_to_keyboard(actions)
-    if kw_buttons:
-        if keyboard:
-            combined = list(keyboard.inline_keyboard) + kw_buttons
-            keyboard = InlineKeyboardMarkup(combined)
-        else:
-            keyboard = InlineKeyboardMarkup(kw_buttons)
+    # 优先使用按设计器布局分组的 keyboard_rows（还原多列布局），
+    # 若服务端未返回则回退到旧版单列 actions
+    if keyboard_rows:
+        keyboard = _keyboard_rows_to_markup(keyboard_rows)
+    else:
+        keyboard = _actions_to_keyboard(actions)
 
     await update.message.reply_text(reply_text, parse_mode="Markdown", reply_markup=keyboard)
 
@@ -163,77 +187,40 @@ async def add_channel_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def wallet_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """/wallet 命令：查看钱包余额和交易记录"""
+    """/wallet 命令 — 调用 /api/bot/command 获取钱包页面（含充值地址）"""
     user = update.effective_user
     await wallet_manager.get_or_create_user(user.id, user.username)
 
-    balance = await wallet_manager.get_balance(user.id)
-    transactions = await wallet_manager.get_transaction_history(user.id, limit=5)
+    api_data = await _call_bot_api("/wallet", user.id)
+    reply_html = api_data.get("reply_html", "")
+    actions = api_data.get("actions", [])
 
-    text = (
-        "💰 **我的钱包**\n\n"
-        f"USDT余额：**{balance:.2f} U**\n\n"
-    )
+    if not reply_html:
+        reply_html = "💰 钱包信息暂不可用，请稍后重试"
 
-    if transactions:
-        text += "**最近交易记录：**\n"
-        for tx in transactions:
-            amount = tx["amount"]
-            sign = "+" if amount > 0 else ""
-            type_map = {
-                "recharge": "充值",
-                "ad_charge": "广告扣费",
-                "build_fee": "建站费",
-                "subscribe": "订阅",
-                "refund": "退款",
-            }
-            type_name = type_map.get(tx["type"], tx["type"])
-            text += f"  {sign}{amount:.2f}U | {type_name} | {tx['description'][:20]}\n"
-    else:
-        text += "暂无交易记录\n"
-
-    text += f"\n💸 /recharge 金额 - 充值USDT"
-    await update.message.reply_text(text, parse_mode="Markdown")
+    reply_text = _html_to_markdown(reply_html)
+    keyboard = _actions_to_keyboard(actions)
+    await update.message.reply_text(reply_text, parse_mode="Markdown", reply_markup=keyboard)
 
 
 async def recharge_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """/recharge 命令：创建充值订单"""
+    """/recharge 命令 — 调用 /api/bot/command 获取充值页面（含充值地址）"""
     user = update.effective_user
 
-    if not context.args:
-        await update.message.reply_text(
-            "用法：/recharge 金额\n"
-            "示例：/recharge 10\n"
-            "（将生成TRC20地址，转账USDT到该地址）"
-        )
-        return
+    # 构建命令字符串（保留参数如 "/recharge 30"）
+    arg = " ".join(context.args) if context.args else ""
+    cmd = f"/recharge {arg}" if arg else "/recharge"
 
-    try:
-        amount = float(context.args[0])
-        if amount <= 0:
-            raise ValueError
-    except ValueError:
-        await update.message.reply_text("金额必须是正数")
-        return
+    api_data = await _call_bot_api(cmd, user.id)
+    reply_html = api_data.get("reply_html", "")
+    actions = api_data.get("actions", [])
 
-    # 创建充值订单
-    order = await wallet_manager.create_recharge_order(user.id, amount, chain="trc20")
+    if not reply_html:
+        reply_html = "💵 充值服务暂不可用，请稍后重试"
 
-    text = (
-        "💸 **USDT充值订单**\n\n"
-        f"订单号：`{order['order_no']}`\n"
-        f"充值金额：**{order['amount']} U**\n"
-        f"链路：TRC20（推荐，gas低）\n\n"
-        f"📥 收款地址：\n`{order['address']}`\n\n"
-        "⚠️ 请使用TRC20网络转账USDT到以上地址\n"
-        "到账后自动入账（需12个区块确认）\n\n"
-        f"查询到账：/checkrecharge {order['order_no']}"
-    )
-
-    keyboard = [[InlineKeyboardButton("📋 复制地址", callback_data=f"copy_addr_{order['address']}")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-
-    await update.message.reply_text(text, parse_mode="Markdown", reply_markup=reply_markup)
+    reply_text = _html_to_markdown(reply_html)
+    keyboard = _actions_to_keyboard(actions)
+    await update.message.reply_text(reply_text, parse_mode="Markdown", reply_markup=keyboard)
 
 
 async def check_recharge_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -261,31 +248,19 @@ async def check_recharge_command(update: Update, context: ContextTypes.DEFAULT_T
 
 
 async def advertise_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """/advertise 命令：广告合作入口"""
+    """/advertise 命令 — 调用 /api/bot/command 获取广告合作页面（含充值地址）"""
     user = update.effective_user
-    await ad_manager.become_advertiser(user.id)
-    balance = await wallet_manager.get_balance(user.id)
 
-    text = (
-        "📢 **广告合作**\n\n"
-        f"您的USDT余额：**{balance:.2f} U**\n\n"
-        "**广告形式：**\n"
-        "用户搜索关键词时，您的广告展示在结果顶部\n\n"
-        "**计费方式：**\n"
-        "• CPC按点击：0.05U/次起\n"
-        "• CPM按曝光：1.0U/千次起\n\n"
-        "**操作命令：**\n"
-        "• /createad - 创建广告计划\n"
-        "• /myads - 查看我的广告\n"
-        "• /adtemplates - 广告模板\n"
-        "• /adstats - 广告数据\n\n"
-        "💡 余额不足时请先 /recharge 充值"
-    )
+    api_data = await _call_bot_api("/advertise", user.id)
+    reply_html = api_data.get("reply_html", "")
+    actions = api_data.get("actions", [])
 
-    if balance < 1.0:
-        text += f"\n\n⚠️ 余额不足（<1U），请先充值"
+    if not reply_html:
+        reply_html = "📢 广告合作服务暂不可用，请稍后重试"
 
-    await update.message.reply_text(text, parse_mode="Markdown")
+    reply_text = _html_to_markdown(reply_html)
+    keyboard = _actions_to_keyboard(actions)
+    await update.message.reply_text(reply_text, parse_mode="Markdown", reply_markup=keyboard)
 
 
 async def create_ad_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -293,9 +268,9 @@ async def create_ad_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     balance = await wallet_manager.get_balance(user.id)
 
-    if balance < 1.0:
+    if balance < Config.MIN_RECHARGE_ADVERTISER:
         await update.message.reply_text(
-            f"⚠️ 余额不足（{balance:.2f}U），创建广告至少需要1U\n"
+            f"⚠️ 余额不足（{balance:.2f}U），创建广告至少需要30U\n"
             "请先 /recharge 充值"
         )
         return
