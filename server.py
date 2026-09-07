@@ -337,7 +337,7 @@ async def _reload_config_from_env_and_db():
     Config.RECHARGE_CONFIRMATIONS = _safe_int(_os.getenv("RECHARGE_CONFIRMATIONS"), 12)
     Config.MIN_RECHARGE_AMOUNT = _safe_float(_os.getenv("MIN_RECHARGE_AMOUNT"), 0.5)
     Config.MIN_RECHARGE_USER = _safe_float(_os.getenv("MIN_RECHARGE_USER"), 10)
-    Config.MIN_RECHARGE_ADVERTISER = _safe_float(_os.getenv("MIN_RECHARGE_ADVERTISER"), 20)
+    Config.MIN_RECHARGE_ADVERTISER = _safe_float(_os.getenv("MIN_RECHARGE_ADVERTISER"), 30)
     Config.CUSTOM_BOT_SETUP_FEE_USDT = _safe_float(_os.getenv("CUSTOM_BOT_SETUP_FEE_USDT"), 500)
     Config.MONTHLY_SUBSCRIPTION_USDT = _safe_float(_os.getenv("MONTHLY_SUBSCRIPTION_USDT"), 99)
     Config.QUARTERLY_SUBSCRIPTION_USDT = _safe_float(_os.getenv("QUARTERLY_SUBSCRIPTION_USDT"), 267)
@@ -938,7 +938,7 @@ async function submitAdForm() {{
           `<button class="cmd-btn bg-sky-600 hover:bg-sky-500" onclick="runCmd('/recharge ${{Math.ceil(d.min_needed||0)}}')">💵 刚好${{Math.ceil(d.min_needed||0)}}U</button>` +
           `<button class="cmd-btn bg-amber-600 hover:bg-amber-500" onclick="runCmd('/wallet')">💰 我的钱包</button>` +
           `</div>` +
-          `<div class="mt-2 text-[10px] text-gray-400">💡 广告主最低充值${{d.min_needed>=20?'':'$20U'}}，充值后余额可综合抵扣搜索和广告费用。</div>` +
+          `<div class="mt-2 text-[10px] text-gray-400">💡 广告主最低充值${{d.min_needed>=30?'':'$30U'}}，充值后余额可综合抵扣搜索和广告费用。</div>` +
           `</div>`, 'bot'
         );
       }} else {{
@@ -5251,24 +5251,56 @@ async def api_admin_bot_push_start_page(request: Request):
         )
         featured_ads = [dict(row) for row in await cur.fetchall()]
     hot_keywords_by_cat = await ad_manager.get_hot_keywords_by_category()
-    reply_html, actions = await _build_start_html(u, balance, featured_ads, hot_keywords_by_cat)
+    reply_html, actions, keyboard_rows = await _build_start_html(u, balance, featured_ads, hot_keywords_by_cat)
     if not reply_html:
         return JSONResponse({"ok": False, "error": "未获取到Bot响应内容"}, status_code=500)
-    # 将HTML转换为Telegram支持的纯文本格式（移除<br>等不合法标签）
-    _sanitized = re.sub(r'<br\s*/?>', '\n', reply_html)
-    _sanitized = re.sub(r'<[^>]+>', '', _sanitized)
+    # 转为Telegram Markdown格式（与Bot start_command完全一致）
+    _sanitized = re.sub(r'\s+class="[^"]*"', "", reply_html)
+    _sanitized = re.sub(r'\s+style="[^"]*"', "", _sanitized)
+    _sanitized = re.sub(r'\s+onclick="[^"]*"', "", _sanitized)
+    _sanitized = _sanitized.replace("<br>", "\n").replace("<br/>", "\n").replace("<br />", "\n")
+    _sanitized = re.sub(r"<b([^>]*)>(.*?)</b>", r"**\2**", _sanitized, flags=re.DOTALL)
+    _sanitized = re.sub(r"<strong([^>]*)>(.*?)</strong>", r"**\2**", _sanitized, flags=re.DOTALL)
+    _sanitized = re.sub(r"<code([^>]*)>(.*?)</code>", r"`\2`", _sanitized, flags=re.DOTALL)
+    _sanitized = re.sub(r"<a([^>]*)href=\"([^\"]*)\"[^>]*>(.*?)</a>", r"[\3](\2)", _sanitized, flags=re.DOTALL)
+    _sanitized = re.sub(r"<[^>]+>", "", _sanitized)
     _sanitized = html.unescape(_sanitized).strip()
+    _sanitized = re.sub(r"\n{3,}", "\n\n", _sanitized)
     preview_text = _sanitized[:2000]
-    push_msg = f"📱 <b>Bot 首页同步预览</b>\n\n{preview_text}"
+    push_msg = f"📱 **Bot 首页同步预览**\n\n{preview_text}"
+    # 基于 keyboard_rows 构建 inline keyboard（与Bot实际一致）
+    inline_kb_rows = []
+    for row in keyboard_rows:
+        kb_row = []
+        for a in row:
+            text = str(a.get("text", ""))
+            cmd = str(a.get("cmd", ""))
+            url = str(a.get("url", ""))
+            callback = str(a.get("callback", ""))
+            if text:
+                btn = {"text": text}
+                if url:
+                    btn["url"] = url
+                elif cmd:
+                    btn["callback_data"] = cmd
+                elif callback:
+                    btn["callback_data"] = callback
+                kb_row.append(btn)
+        if kb_row:
+            inline_kb_rows.append(kb_row)
+    reply_markup = {"inline_keyboard": inline_kb_rows} if inline_kb_rows else None
     results_list = []
     ok_count = 0
     try:
         async with _hx.AsyncClient(timeout=_hx.Timeout(15.0, connect=8.0)) as client:
             for uid in admins:
                 try:
+                    payload = {"chat_id": int(uid), "text": push_msg, "parse_mode": "Markdown"}
+                    if reply_markup:
+                        payload["reply_markup"] = reply_markup
                     r = await client.post(
                         f"https://api.telegram.org/bot{token}/sendMessage",
-                        json={"chat_id": int(uid), "text": push_msg, "parse_mode": "HTML"},
+                        json=payload,
                     )
                     data = r.json()
                     if data.get("ok"):
@@ -6009,14 +6041,51 @@ async def _verify_campaign_owner(tg_user_id: int, campaign_id: int) -> bool:
         return row is not None
 
 
-async def _render_bot_module(mtype, u, balance, featured_ads, hot_keywords_by_cat, channel_promo_ads=None):
-    """根据模块类型渲染 Bot 端 HTML 内容和操作按钮"""
+def _group_actions_into_rows(actions, row_threshold=35, max_per_row=4):
+    """根据 action 的 _top/_left 定位信息，将按钮分组为键盘行。
+    top 差值 <= row_threshold 的按钮视为同一行，行内按 left 排序。
+    返回二维列表：[[btn1, btn2], [btn3], ...]"""
+    if not actions:
+        return []
+    # 过滤出有文本的按钮
+    valid = [a for a in actions if a.get("text")]
+    if not valid:
+        return []
+    # 按 top 升序、left 升序排序
+    sorted_acts = sorted(valid, key=lambda a: (int(a.get("_top", 0) or 0), int(a.get("_left", 0) or 0)))
+    rows = []
+    current_row = [sorted_acts[0]]
+    current_top = int(sorted_acts[0].get("_top", 0) or 0)
+    for a in sorted_acts[1:]:
+        a_top = int(a.get("_top", 0) or 0)
+        if abs(a_top - current_top) <= row_threshold and len(current_row) < max_per_row:
+            current_row.append(a)
+        else:
+            rows.append(current_row)
+            current_row = [a]
+            current_top = a_top
+    if current_row:
+        rows.append(current_row)
+    return rows
+
+
+async def _render_bot_module(mtype, u, balance, featured_ads, hot_keywords_by_cat, channel_promo_ads=None, top=0, left=0):
+    """根据模块类型渲染 Bot 端 HTML 内容和操作按钮
+    top/left 为模块在设计器中的定位坐标，用于按视觉位置排列按钮行"""
     actions = []
     html_part = ""
     promo_ads = channel_promo_ads if channel_promo_ads is not None else featured_ads
+
+    def _act(**kw):
+        """创建带定位信息的 action，便于后续按 top 分行排列
+        若调用方已显式传入 _top/_left 则优先使用，否则使用模块级默认值"""
+        a = dict(kw)
+        a.setdefault("_top", int(top or 0))
+        a.setdefault("_left", int(left or 0))
+        return a
     if mtype == "search_box":
         html_part = "🔍 直接发送关键词搜索，或点击下方按钮开始"
-        actions.append({"text": "🔍 开始搜索", "callback": "__search__"})
+        actions.append(_act(text="🔍 开始搜索", callback="__search__"))
     elif mtype == "result_list":
         html_part = "📋 搜索结果区（发送关键词后将显示）"
     elif mtype == "hot_keywords":
@@ -6030,21 +6099,13 @@ async def _render_bot_module(mtype, u, balance, featured_ads, hot_keywords_by_ca
                     kw_texts = [html.escape(kw.get("keyword", "")) for kw in keywords[:kw_limit]]
                     lines.append(f"{icon} {html.escape(cat_name)}: {', '.join(kw_texts)}")
             if lines:
+                # 纯文本介绍，无点击跳转；用户需通过底部按钮或手动输入搜索
                 html_part = "🚀 热门搜索\n" + "\n".join(lines)
-                for cat_name, cat_data in hot_keywords_by_cat.items():
-                    icon = cat_data.get("icon", "🔍")
-                    keywords = cat_data.get("keywords", [])
-                    for kw in keywords[:kw_limit]:
-                        kw_text = kw.get("keyword", "")
-                        if kw_text:
-                            actions.append({"text": f"🔍 {kw_text}", "callback": f"__kw__{kw_text}"})
             else:
                 html_part = "🚀 暂无热门搜索关键词"
         else:
             default_kws = ["比特币", "以太坊", "AI", "空投"]
             html_part = f"🚀 热门搜索: {', '.join(default_kws)}"
-            for kw in default_kws:
-                actions.append({"text": f"🔍 {kw}", "callback": f"__kw__{kw}"})
     elif mtype == "ads":
         if featured_ads:
             html_part = "📣 今日热门推荐（点击标题直达）"
@@ -6055,40 +6116,43 @@ async def _render_bot_module(mtype, u, balance, featured_ads, hot_keywords_by_ca
                 desc_short = desc[:30] + '…' if len(desc) > 30 else desc
                 ad_row = f'{title}  ·  {desc_short}' if desc else title
                 if url and url != '#':
-                    actions.append({"text": f"👉 {title[:10]}", "url": url})
+                    actions.append(_act(text=f"👉 {title[:10]}", url=url))
                 html_part += f"\n{ad_row}"
     elif mtype == "channel_promo":
         if promo_ads:
-            html_part = "📢 推广频道（点击加入）"
+            html_part = "📢 频道群组推广\n"
             for ad in promo_ads[:6]:
                 title = html.escape(ad.get('title', ''))
                 members = ad.get('member_count', 0)
+                desc = html.escape(ad.get('description', ''))
                 url = html.escape(ad.get('target_url', '#'))
+                desc_short = desc[:40] + '…' if len(desc) > 40 else desc
+                desc_line = f"\n📝 {desc_short}" if desc_short else ""
+                html_part += f"\n🔗 {title}" + (f"  ·  👥{members}" if members else "") + desc_line
                 if url and url != '#':
-                    actions.append({"text": f"👉 {title[:10]}", "url": url})
-                html_part += f"\n🔗 {title}" + (f" · 👥{members}" if members else "")
+                    actions.append(_act(text=f"👉 点击加入 {title[:15]}", url=url))
         else:
-            html_part = "📢 推广频道\n\n💡 点击 /channels 查看全部频道列表"
+            html_part = "📢 频道群组推广\n\n💡 点击 /channels 查看全部频道列表"
     elif mtype == "wallet":
         html_part = f"💰 钱包余额: ${balance:.2f} U (USDT TRC20)"
-        actions.append({"text": "💰 /wallet 钱包", "cmd": "/wallet"})
+        actions.append(_act(text="💰 /wallet 钱包", cmd="/wallet"))
     elif mtype == "stats":
         html_part = "📊 账户统计 — 点击查看详细数据"
-        actions.append({"text": "📊 /stats 统计", "cmd": "/stats"})
+        actions.append(_act(text="📊 /stats 统计", cmd="/stats"))
     elif mtype == "channels":
         html_part = "📺 频道管理 — 查看频道列表、统计数据"
-        actions.append({"text": "📺 /channels 频道", "cmd": "/channels"})
+        actions.append(_act(text="📺 /channels 频道", cmd="/channels"))
     elif mtype == "advertise":
         html_part = "📣 广告合作 — 发布广告、精准投放、ROI追踪"
-        actions.append({"text": "📣 /advertise 合作", "cmd": "/advertise"})
+        # /advertise 已包含在底部快捷菜单（top=9999），此处不重复添加
     elif mtype == "quick_actions":
         actions.extend([
-            {"text": "🏠 /start 首页", "cmd": "/start"},
-            {"text": "📊 /stats 统计", "cmd": "/stats"},
-            {"text": "💰 /wallet 钱包", "cmd": "/wallet"},
-            {"text": "💵 /recharge 充值", "cmd": "/recharge"},
-            {"text": "📺 /channels 频道", "cmd": "/channels"},
-            {"text": "📣 /advertise 合作", "cmd": "/advertise"},
+            _act(text="🏠 /start 首页", cmd="/start"),
+            _act(text="📊 /stats 统计", cmd="/stats"),
+            _act(text="💰 /wallet 钱包", cmd="/wallet"),
+            _act(text="💵 /recharge 充值", cmd="/recharge"),
+            _act(text="📺 /channels 频道", cmd="/channels"),
+            _act(text="📣 /advertise 合作", cmd="/advertise"),
         ])
     elif mtype == "custom_html":
         html_part = ''
@@ -6114,6 +6178,13 @@ async def _build_start_html(u, balance, featured_ads, hot_keywords_by_cat):
     # 如果有保存的演示布局，按布局渲染模块
     if demo_layout and isinstance(demo_layout, dict) and demo_layout.get("modules"):
         layout_modules = demo_layout.get("modules", [])
+        # 按视觉位置排序：top 升序（从上到下），同 top 按 left 升序（从左到右）
+        # 兼容旧版数据：top/left 为 None 时按原索引排序，避免所有模块堆在一起
+        indexed_modules = [(i, m) for i, m in enumerate(layout_modules) if isinstance(m, dict) and m.get("visible", True)]
+        sorted_modules = sorted(
+            indexed_modules,
+            key=lambda item: (int(item[1].get("top") or (item[0] * 80)), int(item[1].get("left") or 15))
+        )
         parts = []
         # 欢迎语 + 身份信息（始终显示）
         parts.append(f"""👋 <b>欢迎使用 TG搜索Pro Bot</b><br>
@@ -6121,14 +6192,18 @@ async def _build_start_html(u, balance, featured_ads, hot_keywords_by_cat):
                     👤 身份：@{u.get('username','游客')} · 💰 余额：<b class="text-yellow-300">${balance:.2f} U</b> ·
                     📊 免费搜索：<b>5</b> 次/天
                 </div>""")
-        for m in layout_modules:
-            if not isinstance(m, dict) or not m.get("visible", True):
-                continue
+        for _orig_idx, m in sorted_modules:
             mtype = m.get("type", "")
+            # top/left 为 None 时用索引计算默认位置（每模块间隔80px，避免所有模块堆在一起）
+            m_top = int(m.get("top") or (_orig_idx * 80))
+            m_left = int(m.get("left") or 15)
             # 兼容旧版模块类型
             legacy_map = {"title": "custom_html", "search": "search_box", "hot": "hot_keywords", "ad": "ads", "channel": "channels"}
             mtype = legacy_map.get(mtype, mtype)
-            html_part, m_actions = await _render_bot_module(mtype, u, balance, featured_ads, hot_keywords_by_cat, channel_promo_ads=[])
+            html_part, m_actions = await _render_bot_module(
+                mtype, u, balance, featured_ads, hot_keywords_by_cat,
+                channel_promo_ads=featured_ads, top=m_top, left=m_left
+            )
             if html_part:
                 parts.append(html_part)
             if m_actions:
@@ -6141,19 +6216,21 @@ async def _build_start_html(u, balance, featured_ads, hot_keywords_by_cat):
             "📣 /advertise 广告合作　💵 /recharge 充值"
         )
         reply_html += bottom_menu
-        # 始终包含基础快捷操作按钮（合并去重）
-        default_shortcuts = [
-            {"text": "📊 /stats 数据统计", "cmd": "/stats"},
-            {"text": "💰 /wallet 钱包", "cmd": "/wallet"},
-            {"text": "📺 /channels 频道管理", "cmd": "/channels"},
-            {"text": "📣 /ads 广告管理", "cmd": "/ads"},
-            {"text": "📣 /advertise 广告合作", "cmd": "/advertise"},
-        ]
+        # 始终包含基础快捷操作按钮（合并去重），放在最底部行
         existing_cmds = {a.get("cmd") for a in actions if a.get("cmd")}
+        default_shortcuts = [
+            {"text": "📊 /stats 数据统计", "cmd": "/stats", "_top": 9999, "_left": 0},
+            {"text": "💰 /wallet 钱包", "cmd": "/wallet", "_top": 9999, "_left": 1},
+            {"text": "📺 /channels 频道管理", "cmd": "/channels", "_top": 9999, "_left": 2},
+            {"text": "📣 /ads 广告管理", "cmd": "/ads", "_top": 9999, "_left": 3},
+            {"text": "📣 /advertise 广告合作", "cmd": "/advertise", "_top": 9999, "_left": 4},
+        ]
         for ds in default_shortcuts:
             if ds["cmd"] not in existing_cmds:
                 actions.append(ds)
-        return reply_html, actions
+        # 按视觉位置分组键盘按钮行：top 差值 <= 35px 视为同一行
+        keyboard_rows = _group_actions_into_rows(actions)
+        return reply_html, actions, keyboard_rows
 
     # 默认布局（无保存的演示布局时使用）
     ad_limit = Config.FEATURED_AD_LIMIT
@@ -6227,13 +6304,14 @@ async def _build_start_html(u, balance, featured_ads, hot_keywords_by_cat):
                 </div>"""
 
     actions = [
-        {"text": "📊 /stats 数据统计", "cmd": "/stats"},
-        {"text": "💰 /wallet 钱包", "cmd": "/wallet"},
-        {"text": "📺 /channels 频道管理", "cmd": "/channels"},
-        {"text": "📣 /ads 广告管理", "cmd": "/ads"},
-        {"text": "📣 /advertise 广告合作", "cmd": "/advertise"},
+        {"text": "📊 /stats 数据统计", "cmd": "/stats", "_top": 0, "_left": 0},
+        {"text": "💰 /wallet 钱包", "cmd": "/wallet", "_top": 0, "_left": 1},
+        {"text": "📺 /channels 频道管理", "cmd": "/channels", "_top": 0, "_left": 2},
+        {"text": "📣 /ads 广告管理", "cmd": "/ads", "_top": 0, "_left": 3},
+        {"text": "📣 /advertise 广告合作", "cmd": "/advertise", "_top": 0, "_left": 4},
     ] + actions
-    return reply_html, actions
+    keyboard_rows = _group_actions_into_rows(actions)
+    return reply_html, actions, keyboard_rows
 
 
 @app.post("/api/bot/command")
@@ -6260,6 +6338,7 @@ async def api_bot_command(request: Request):
         actions = []
         recharge_action = None
         hot_keywords = []
+        keyboard_rows = []
 
         if cmd == "/start":
             u = await wallet_manager.get_or_create_user(tg_user_id)
@@ -6276,7 +6355,7 @@ async def api_bot_command(request: Request):
                 )
                 featured_ads = [dict(row) for row in await cur.fetchall()]
             hot_keywords_by_cat = await ad_manager.get_hot_keywords_by_category()
-            reply_html, actions = await _build_start_html(u, balance, featured_ads, hot_keywords_by_cat)
+            reply_html, actions, keyboard_rows = await _build_start_html(u, balance, featured_ads, hot_keywords_by_cat)
             hot_keywords = []
             if hot_keywords_by_cat:
                 for cat_name, cat_data in hot_keywords_by_cat.items():
@@ -6367,16 +6446,21 @@ async def api_bot_command(request: Request):
                     {"text": "💵 自定义金额", "cmd": "/recharge"},
                     {"text": "📣 开通广告主", "cmd": "/advertise"},
                 ]
+            keyboard_rows = _group_actions_into_rows(actions)
         elif cmd == "/recharge":
             user_info = await wallet_manager.get_or_create_user(tg_user_id)
             is_advertiser = user_info.get("role") == "advertiser"
             min_recharge = Config.MIN_RECHARGE_ADVERTISER if is_advertiser else Config.MIN_RECHARGE_USER
             role_label = "广告主" if is_advertiser else "普通会员"
             amount_text = arg.strip() if arg else ""
+            wallet_addr = await wallet_manager.get_recharge_address(tg_user_id)
+            addr_display = wallet_addr.get("address", "") if wallet_addr else ""
+            addr_html = f'<br>💳 专属充值地址（TRC20，永久不变）：<br><code class="text-xs break-all bg-black/40 p-1.5 rounded block mt-1 text-emerald-300">{addr_display}</code><br><span class="text-[10px] text-gray-400">将USDT转入以上地址即可充值，地址永久不变</span>' if addr_display else ""
             if not amount_text or not amount_text.replace(".", "").replace("，", "").isdigit():
                 reply_html = f"""💵 <b>USDT 充值</b>
 <br>您的身份：<b>{role_label}</b>
 <br>💡 充值后余额可综合抵扣搜索费用和广告投放
+{addr_html}
 <br>
 <b>🔳 快速充值（最低${min_recharge}U）</b><br>
 点击下方按钮直接充值："""
@@ -6415,6 +6499,7 @@ async def api_bot_command(request: Request):
                         {"text": "💰 查看钱包余额", "cmd": "/wallet"},
                         {"text": "✅ 检查充值状态", "cmd": f"/checkrecharge {order['order_no']}"},
                     ]
+            keyboard_rows = _group_actions_into_rows(actions)
         elif cmd == "/checkrecharge":
             order_no = arg.strip()
             if order_no:
@@ -6426,11 +6511,15 @@ async def api_bot_command(request: Request):
             balance = await wallet_manager.get_balance(tg_user_id)
             r = await ad_manager.become_advertiser(tg_user_id)
             min_recharge_adv = Config.MIN_RECHARGE_ADVERTISER
+            wallet_addr = await wallet_manager.get_recharge_address(tg_user_id)
+            addr_display = wallet_addr.get("address", "") if wallet_addr else ""
+            addr_html = f'<br><b>💳 专属充值地址（TRC20，永久不变）：</b><br><code class="text-xs break-all bg-black/40 p-1.5 rounded block mt-1 text-emerald-300">{addr_display}</code>' if addr_display else ""
             reply_html = f"""📣 <b>广告合作中心</b><br>
 🎯 盈利模式：关键词搜索 → 置顶广告展示 → CPC/CPM扣费<br>
 您当前状态：<b class="text-emerald-400">{'✅ 已开通广告主权限' if r.get('ok') or balance>0 else '⏳ 首次需充值开通'}</b><br>
 钱包余额：<b class="text-yellow-300">${balance:.2f} U</b><br>
 <span class="text-[11px] text-gray-400">💡 余额可综合抵扣搜索和广告消耗</span>
+{addr_html}
 <br><br>
 <b>💼 定价方案</b><br>
 • CPC 单次点击：<b>${Config.DEFAULT_CPC_PRICE}</b>起 / 次<br>
@@ -6448,6 +6537,7 @@ async def api_bot_command(request: Request):
                 {"text": "📋 我的广告 /myads", "cmd": "/myads"},
                 {"text": "📈 广告数据统计 /adstats", "cmd": "/adstats"},
             ]
+            keyboard_rows = _group_actions_into_rows(actions)
         elif cmd == "/createad":
             demo_kws = ["比特币", "以太坊", "AI", "空投", "Python", "FastAPI"]
             kw = random.choice(demo_kws)
@@ -6747,6 +6837,7 @@ async def api_bot_command(request: Request):
         return JSONResponse({
             "reply_html": reply_html,
             "actions": actions,
+            "keyboard_rows": keyboard_rows,
             "recharge_action": recharge_action,
             "hot_keywords": hot_keywords,
         })
@@ -7402,7 +7493,7 @@ async def get_featured_channels():
 
 @app.post("/api/bot/push_demo")
 async def push_demo_to_bot(request: Request):
-    """一键推送到Bot：将演示布局配置序列化后推送至管理员Telegram"""
+    """一键推送到Bot：渲染实际Bot首页并推送至管理员Telegram，确保与Bot端显示完全一致"""
     try:
         raw = await request.body()
         if not raw:
@@ -7420,67 +7511,125 @@ async def push_demo_to_bot(request: Request):
         layout = p.get("layout", {})
         if not isinstance(layout, dict):
             layout = {}
-        # 确保布局先保存到数据库（防御性：即使前端config保存失败也能生效）
+        # 先保存布局到数据库
         try:
             from app.admin.system_settings_manager import upsert_setting
             async with get_db() as db:
                 await upsert_setting(db, "demo_layout", _json.dumps(layout, ensure_ascii=False))
         except Exception as _e:
             logger.warning(f"push_demo 保存布局失败: {_e}")
+
         modules = layout.get("modules", [])
         if not isinstance(modules, list):
             modules = []
         columns = layout.get("columns", 1)
         user_id = layout.get("user_id", 10000001)
-        # 构建推送内容摘要
-        module_names = []
-        for m in modules:
-            if not isinstance(m, dict):
-                continue
-            t = m.get("type", "")
-            name_map = {
-                "search_box": "🔍 搜索框", "result_list": "📋 搜索结果",
-                "hot_keywords": "⭐ 热门搜索", "ads": "📣 广告卡片",
-                "wallet": "💰 钱包余额", "stats": "📊 数据统计",
-                "channels": "📺 频道管理", "channel_promo": "📢 频道推广",
-                "advertise": "📣 广告合作入口",
-                "quick_actions": "⚡ 快捷操作", "custom_html": "📝 自定义HTML",
-            }
-            module_names.append(name_map.get(t, t))
-        layout_summary = f"📱 <b>TG搜索机器人 · 演示布局</b>\n\n"
-        layout_summary += f"布局格式：{columns} 列\n"
-        layout_summary += f"演示用户：TG {user_id}\n"
-        layout_summary += f"模块数量：{len(modules)} 个\n\n"
-        layout_summary += "📦 模块列表：\n"
-        for i, name in enumerate(module_names, 1):
-            layout_summary += f"  {i}. {name}\n"
-        layout_summary += "\n💡 提示：请在Bot端输入 /start 查看完整首页效果"
+
+        # 构建模块名称列表（用于返回）
+        name_map = {
+            "search_box": "🔍 搜索框", "result_list": "📋 搜索结果",
+            "hot_keywords": "⭐ 热门搜索", "ads": "📣 广告卡片",
+            "wallet": "💰 钱包余额", "stats": "📊 数据统计",
+            "channels": "📺 频道管理", "channel_promo": "📢 频道推广",
+            "advertise": "📣 广告合作入口",
+            "quick_actions": "⚡ 快捷操作", "custom_html": "📝 自定义HTML",
+        }
+        module_names = [name_map.get(m.get("type", ""), m.get("type", "")) for m in modules if isinstance(m, dict)]
+
+        # 渲染实际的 Bot /start 首页 HTML
+        tg_uid = int(admins[0])
+        u = await wallet_manager.get_or_create_user(tg_uid)
+        balance = await wallet_manager.get_balance(tg_uid)
+        ad_limit = Config.FEATURED_AD_LIMIT
+        featured_ads = []
+        async with get_db() as db:
+            cur = await db.execute(
+                """SELECT * FROM channels WHERE is_featured = 1
+                   ORDER BY sort_order ASC, id ASC LIMIT ?""",
+                (ad_limit,)
+            )
+            featured_ads = [dict(row) for row in await cur.fetchall()]
+        hot_keywords_by_cat = await ad_manager.get_hot_keywords_by_category()
+        reply_html, actions, keyboard_rows = await _build_start_html(u, balance, featured_ads, hot_keywords_by_cat)
+
+        if not reply_html:
+            return JSONResponse({"ok": False, "error": "未获取到Bot响应内容"}, status_code=500)
+
+        # 将HTML转为Telegram Markdown格式（与Bot实际发送格式完全一致）
+        _no_classes = re.sub(r'\s+class="[^"]*"', "", reply_html)
+        _no_classes = re.sub(r'\s+style="[^"]*"', "", _no_classes)
+        _no_classes = re.sub(r'\s+onclick="[^"]*"', "", _no_classes)
+        _no_classes = _no_classes.replace("<br>", "\n").replace("<br/>", "\n").replace("<br />", "\n")
+        _no_classes = re.sub(r"<b([^>]*)>(.*?)</b>", r"**\2**", _no_classes, flags=re.DOTALL)
+        _no_classes = re.sub(r"<strong([^>]*)>(.*?)</strong>", r"**\2**", _no_classes, flags=re.DOTALL)
+        _no_classes = re.sub(r"<code([^>]*)>(.*?)</code>", r"`\2`", _no_classes, flags=re.DOTALL)
+        _no_classes = re.sub(r"<a([^>]*)href=\"([^\"]*)\"[^>]*>(.*?)</a>", r"[\3](\2)", _no_classes, flags=re.DOTALL)
+        _no_classes = re.sub(r"<[^>]+>", "", _no_classes)
+        push_text = html.unescape(_no_classes).strip()
+        push_text = re.sub(r"\n{3,}", "\n\n", push_text)
+
+        # 基于 keyboard_rows（按设计器布局位置分组）构建 inline keyboard
+        inline_kb_rows = []
+        for row in keyboard_rows:
+            kb_row = []
+            for a in row:
+                text = str(a.get("text", ""))
+                cmd = str(a.get("cmd", ""))
+                url = str(a.get("url", ""))
+                callback = str(a.get("callback", ""))
+                if text:
+                    btn = {"text": text}
+                    if url:
+                        btn["url"] = url
+                    elif cmd:
+                        btn["callback_data"] = cmd
+                    elif callback:
+                        btn["callback_data"] = callback
+                    kb_row.append(btn)
+            if kb_row:
+                inline_kb_rows.append(kb_row)
+
+        reply_markup = {"inline_keyboard": inline_kb_rows} if inline_kb_rows else None
+
         results_list = []
         ok_count = 0
+        sent_message_ids = []
         try:
             async with _hx.AsyncClient(timeout=_hx.Timeout(15.0, connect=8.0)) as client:
                 for uid in admins:
                     try:
+                        send_payload = {
+                            "chat_id": int(uid),
+                            "text": push_text,
+                            "parse_mode": "Markdown",
+                        }
+                        if reply_markup:
+                            send_payload["reply_markup"] = reply_markup
                         r = await client.post(
                             f"https://api.telegram.org/bot{token}/sendMessage",
-                            json={"chat_id": int(uid), "text": layout_summary, "parse_mode": "HTML"},
+                            json=send_payload,
                         )
                         data = r.json()
                         if data.get("ok"):
                             ok_count += 1
-                            results_list.append(f"✅ 推送至管理员 {uid} 成功")
+                            mid = data.get("result", {}).get("message_id", "")
+                            sent_message_ids.append(mid)
+                            results_list.append(f"✅ 推送至管理员 {uid} 成功 (msg_id:{mid})")
                         else:
                             results_list.append(f"⚠️ 推送至 {uid} 失败：{data.get('description','')}")
                     except Exception as e:
                         results_list.append(f"❌ 推送至 {uid} 异常：{str(e)[:60]}")
         except Exception as e:
             return JSONResponse({"ok": False, "error": f"HTTP 请求失败：{str(e)[:100]}"}, status_code=500)
+
         return JSONResponse({
             "ok": ok_count > 0,
             "sent_count": ok_count,
             "results": results_list,
             "module_count": len(modules),
             "columns": columns,
+            "pushed_text_length": len(push_text),
+            "sent_message_ids": sent_message_ids,
         })
     except Exception as e:
         logger.warning(f"push_demo_to_bot 异常: {str(e)[:200]}")

@@ -139,7 +139,7 @@ SETTING_GROUPS: List[Dict[str, Any]] = [
             {"key": "RECHARGE_CONFIRMATIONS", "type": "int", "label": "充值确认区块数", "sensitive": False, "default": 12, "in_env": True},
             {"key": "MIN_RECHARGE_AMOUNT", "type": "float", "label": "链上最低充值金额（USDT）", "sensitive": False, "default": 0.5, "in_env": True},
             {"key": "MIN_RECHARGE_USER", "type": "float", "label": "普通会员最低充值（USDT）", "sensitive": False, "default": 10, "in_env": True},
-            {"key": "MIN_RECHARGE_ADVERTISER", "type": "float", "label": "广告主最低充值（USDT）", "sensitive": False, "default": 20, "in_env": True},
+            {"key": "MIN_RECHARGE_ADVERTISER", "type": "float", "label": "广告主最低充值（USDT）", "sensitive": False, "default": 30, "in_env": True},
             {"key": "CUSTOM_BOT_SETUP_FEE_USDT", "type": "float", "label": "专属机器人开通费（USDT）", "sensitive": False, "default": 500, "in_env": True},
             {"key": "MONTHLY_SUBSCRIPTION_USDT", "type": "float", "label": "月度订阅（USDT）", "sensitive": False, "default": 99, "in_env": True},
             {"key": "QUARTERLY_SUBSCRIPTION_USDT", "type": "float", "label": "季度订阅（USDT）", "sensitive": False, "default": 267, "in_env": True},

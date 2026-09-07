@@ -194,12 +194,16 @@ async def wallet_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     api_data = await _call_bot_api("/wallet", user.id)
     reply_html = api_data.get("reply_html", "")
     actions = api_data.get("actions", [])
+    keyboard_rows = api_data.get("keyboard_rows", [])
 
     if not reply_html:
         reply_html = "💰 钱包信息暂不可用，请稍后重试"
 
     reply_text = _html_to_markdown(reply_html)
-    keyboard = _actions_to_keyboard(actions)
+    if keyboard_rows:
+        keyboard = _keyboard_rows_to_markup(keyboard_rows)
+    else:
+        keyboard = _actions_to_keyboard(actions)
     await update.message.reply_text(reply_text, parse_mode="Markdown", reply_markup=keyboard)
 
 
@@ -214,12 +218,16 @@ async def recharge_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     api_data = await _call_bot_api(cmd, user.id)
     reply_html = api_data.get("reply_html", "")
     actions = api_data.get("actions", [])
+    keyboard_rows = api_data.get("keyboard_rows", [])
 
     if not reply_html:
         reply_html = "💵 充值服务暂不可用，请稍后重试"
 
     reply_text = _html_to_markdown(reply_html)
-    keyboard = _actions_to_keyboard(actions)
+    if keyboard_rows:
+        keyboard = _keyboard_rows_to_markup(keyboard_rows)
+    else:
+        keyboard = _actions_to_keyboard(actions)
     await update.message.reply_text(reply_text, parse_mode="Markdown", reply_markup=keyboard)
 
 
@@ -254,12 +262,16 @@ async def advertise_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     api_data = await _call_bot_api("/advertise", user.id)
     reply_html = api_data.get("reply_html", "")
     actions = api_data.get("actions", [])
+    keyboard_rows = api_data.get("keyboard_rows", [])
 
     if not reply_html:
         reply_html = "📢 广告合作服务暂不可用，请稍后重试"
 
     reply_text = _html_to_markdown(reply_html)
-    keyboard = _actions_to_keyboard(actions)
+    if keyboard_rows:
+        keyboard = _keyboard_rows_to_markup(keyboard_rows)
+    else:
+        keyboard = _actions_to_keyboard(actions)
     await update.message.reply_text(reply_text, parse_mode="Markdown", reply_markup=keyboard)
 
 
@@ -508,6 +520,50 @@ async def kw_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     keyboard = _actions_to_keyboard(actions)
     await cb.edit_message_text(reply_md, parse_mode="Markdown", reply_markup=keyboard)
+
+
+async def command_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """通用命令回调处理器 — 处理所有 /cmd 按钮点击，统一调用 API 并更新消息"""
+    cb = update.callback_query
+    await cb.answer()
+    data = cb.data or ""
+
+    # 跳过已单独处理的回调
+    if data == "__search__" or data.startswith("__kw__"):
+        return
+
+    # 匹配 /command 或 /command arg 格式
+    import re as _re
+    m = _re.match(r"^/(\w+)(?:\s+(.+))?$", data)
+    if not m:
+        return
+
+    cmd = "/" + m.group(1).lower()
+    arg = m.group(2) or ""
+    user_id = cb.from_user.id
+
+    # 特殊处理：/checkrecharge 需带订单号
+    if cmd == "/checkrecharge" and not arg:
+        await cb.edit_message_text("⚠️ 请提供订单号\n用法：点击 /checkrecharge 按钮后输入订单号")
+        return
+
+    # 调用 API 获取响应
+    api_cmd = f"{cmd} {arg}".strip() if arg else cmd
+    api_data = await _call_bot_api(api_cmd, user_id)
+    reply_html = api_data.get("reply_html", "")
+    actions = api_data.get("actions", [])
+    keyboard_rows = api_data.get("keyboard_rows", [])
+
+    if not reply_html:
+        await cb.edit_message_text("⚠️ 服务暂不可用，请稍后重试")
+        return
+
+    reply_text = _html_to_markdown(reply_html)
+    if keyboard_rows:
+        keyboard = _keyboard_rows_to_markup(keyboard_rows)
+    else:
+        keyboard = _actions_to_keyboard(actions)
+    await cb.edit_message_text(reply_text, parse_mode="Markdown", reply_markup=keyboard)
 
 
 # ============ AI 智能搜索 ============

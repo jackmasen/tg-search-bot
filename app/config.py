@@ -118,7 +118,7 @@ class Config:
     # 普通用户最低充值
     MIN_RECHARGE_USER: float = _safe_float(os.getenv("MIN_RECHARGE_USER"), 10)
     # 广告主最低充值
-    MIN_RECHARGE_ADVERTISER: float = _safe_float(os.getenv("MIN_RECHARGE_ADVERTISER"), 20)
+    MIN_RECHARGE_ADVERTISER: float = _safe_float(os.getenv("MIN_RECHARGE_ADVERTISER"), 30)
     # 业务定价
     CUSTOM_BOT_SETUP_FEE_USDT: float = _safe_float(os.getenv("CUSTOM_BOT_SETUP_FEE_USDT"), 500)
     MONTHLY_SUBSCRIPTION_USDT: float = _safe_float(os.getenv("MONTHLY_SUBSCRIPTION_USDT"), 99)
