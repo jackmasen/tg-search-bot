@@ -605,6 +605,10 @@ async def startup_event():
     # 初始化数据库
     await init_production_db()
 
+    # 初始化广告模板库（INSERT OR IGNORE，幂等）
+    await ad_manager.init_templates()
+    print(f"[生产模式] 广告模板库初始化完成")
+
     # 从 DB 加载配置覆盖
     try:
         async with get_db() as db:
@@ -672,16 +676,202 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans
 .hot-kw-chip {{ font-size:11px; background:#334155; color:#e2e8f0; padding:2px 8px; border-radius:999px;
                    white-space:nowrap; border:1px solid #475569; cursor:pointer; }}
 .hot-kw-chip:hover {{ background:#475569; border-color:#64748b; }}
-/* 移动端响应式：手机屏幕自适应 */
-@media (max-width: 480px) {{
-  .ad-row {{ padding:5px 8px; font-size:11px; gap:4px; }}
-  .ad-title {{ font-size:11px; flex:0 1 40%; }}
-  .ad-desc {{ font-size:10px; flex:1 1 30%; }}
-  .ad-action {{ font-size:10px; padding:1px 7px; }}
-  .hot-kw-label {{ min-width:64px; font-size:10px; }}
-  .hot-kw-tag {{ font-size:10px; }}
-  .chat-bubble-bot, .chat-bubble-user {{ max-width:94%!important; font-size:12px; }}
-}}
+/* 首页欢迎Banner */
+.bot-welcome-banner {
+  background: linear-gradient(135deg, #0a1628 0%, #0d2137 30%, #102a50 60%, #0a1e3d 100%);
+  border-radius: 16px; padding: 16px 20px; margin-bottom: 14px;
+  border: 1px solid rgba(56,189,248,0.2); position: relative; overflow: hidden;
+}
+.bot-welcome-banner::before {
+  content: ''; position: absolute; top: -60px; right: -30px;
+  width: 220px; height: 220px;
+  background: radial-gradient(circle, rgba(56,189,248,0.15) 0%, transparent 70%);
+  border-radius: 50%; pointer-events: none;
+}
+.bot-welcome-banner::after {
+  content: ''; position: absolute; bottom: -50px; left: 20%;
+  width: 160px; height: 160px;
+  background: radial-gradient(circle, rgba(99,102,241,0.1) 0%, transparent 70%);
+  border-radius: 50%; pointer-events: none;
+}
+.bot-welcome-inner {
+  display: flex; align-items: center; gap: 14px;
+  position: relative; z-index: 1;
+}
+.bot-welcome-text { flex: 1; min-width: 0; }
+.bot-welcome-title {
+  font-size: 17px; font-weight: 800; color: #fff;
+  margin-bottom: 6px; line-height: 1.4;
+  text-shadow: 0 0 20px rgba(56,189,248,0.4);
+}
+.bot-welcome-desc {
+  font-size: 12px; color: #94a3b8; line-height: 1.7; margin-bottom: 8px;
+}
+.bot-welcome-desc b { color: #38bdf8; font-weight: 600; }
+.bot-welcome-info { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.bot-welcome-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: rgba(56,189,248,0.1); border: 1px solid rgba(56,189,248,0.25);
+  border-radius: 20px; padding: 3px 10px; font-size: 11px; color: #7dd3fc;
+}
+.bot-robot-icon-wrap {
+  width: 88px; height: 88px; flex-shrink: 0; position: relative;
+}
+.bot-robot-img {
+  width: 88px; height: 88px; border-radius: 50%;
+  background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 50%, #8b5cf6 100%);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 44px; box-shadow: 0 0 30px rgba(56,189,248,0.4), 0 0 60px rgba(99,102,241,0.2);
+  border: 3px solid rgba(56,189,248,0.35);
+  animation: bot-pulse 3s ease-in-out infinite;
+}
+@keyframes bot-pulse {
+  0%, 100% { box-shadow: 0 0 30px rgba(56,189,248,0.4), 0 0 60px rgba(99,102,241,0.2); }
+  50% { box-shadow: 0 0 40px rgba(56,189,248,0.6), 0 0 80px rgba(99,102,241,0.35); }
+}
+.module-section-title {
+  font-size: 15px; font-weight: 700; color: #fff;
+  margin-bottom: 4px; display: flex; align-items: center; gap: 6px;
+}
+.module-section-sub { font-size: 11px; color: #64748b; margin-bottom: 10px; }
+.promo-card {
+  background: linear-gradient(135deg, rgba(13,33,55,0.95), rgba(10,22,40,0.98));
+  border: 1px solid rgba(56,189,248,0.15);
+  border-radius: 14px; padding: 12px 14px; margin-bottom: 10px;
+  display: flex; align-items: center; gap: 12px; transition: all 0.15s;
+}
+.promo-card:hover {
+  border-color: rgba(56,189,248,0.45);
+  background: linear-gradient(135deg, rgba(18,42,70,0.97), rgba(13,33,55,0.99));
+  transform: translateY(-1px);
+  box-shadow: 0 4px 20px rgba(56,189,248,0.15);
+}
+.promo-icon {
+  width: 52px; height: 52px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 24px; flex-shrink: 0;
+  border: 2px solid rgba(255,255,255,0.12);
+  box-shadow: 0 2px 12px rgba(0,0,0,0.3);
+}
+.promo-icon.blue   { background: linear-gradient(135deg, #0ea5e9, #0284c7); }
+.promo-icon.purple { background: linear-gradient(135deg, #8b5cf6, #6d28d9); }
+.promo-icon.green  { background: linear-gradient(135deg, #10b981, #059669); }
+.promo-icon.yellow { background: linear-gradient(135deg, #f59e0b, #d97706); }
+.promo-icon.teal   { background: linear-gradient(135deg, #14b8a6, #0d9488); }
+.promo-icon.rose   { background: linear-gradient(135deg, #f43f5e, #e11d48); }
+.promo-info { flex: 1; min-width: 0; }
+.promo-title-row { display: flex; align-items: center; gap: 5px; margin-bottom: 4px; }
+.promo-title {
+  font-size: 13px; font-weight: 700; color: #fff;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1;
+}
+.promo-verified { font-size: 13px; flex-shrink: 0; }
+.promo-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 4px; }
+.promo-tag {
+  font-size: 10px; background: rgba(56,189,248,0.12); color: #7dd3fc;
+  padding: 1px 7px; border-radius: 8px; white-space: nowrap;
+  border: 1px solid rgba(56,189,248,0.2);
+}
+.promo-desc {
+  font-size: 11px; color: #94a3b8;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.promo-enter {
+  background: linear-gradient(135deg, #0ea5e9, #38bdf8);
+  color: #fff; border: none; border-radius: 20px;
+  padding: 8px 16px; font-size: 12px; font-weight: 600;
+  cursor: pointer; white-space: nowrap; flex-shrink: 0;
+  text-decoration: none; display: inline-flex; align-items: center; gap: 4px;
+  box-shadow: 0 2px 12px rgba(14,165,233,0.4); transition: all 0.15s;
+}
+.promo-enter:hover {
+  transform: scale(1.06); box-shadow: 0 4px 18px rgba(14,165,233,0.55);
+  filter: brightness(1.12);
+}
+.kw-section {
+  background: linear-gradient(135deg, rgba(13,33,55,0.9), rgba(10,22,40,0.95));
+  border: 1px solid rgba(56,189,248,0.12);
+  border-radius: 14px; padding: 14px; margin-bottom: 12px;
+}
+.kw-section-title {
+  font-size: 15px; font-weight: 700; color: #fff;
+  margin-bottom: 4px; display: flex; align-items: center; gap: 6px;
+}
+.kw-cat-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.kw-cat-row:last-child { margin-bottom: 0; }
+.kw-cat-label {
+  font-size: 12px; color: #94a3b8; white-space: nowrap;
+  min-width: 76px; display: flex; align-items: center; gap: 4px; font-weight: 500;
+}
+.kw-pills { display: flex; flex-wrap: wrap; gap: 6px; flex: 1; }
+.kw-pill {
+  font-size: 11px; padding: 4px 12px; border-radius: 20px;
+  cursor: pointer; border: none; font-weight: 600;
+  transition: all 0.15s; text-decoration: none; color: #fff;
+}
+.kw-pill:hover { transform: scale(1.06); filter: brightness(1.15); }
+.kw-pill.c0 { background: linear-gradient(135deg, #f97316, #ef4444); }
+.kw-pill.c1 { background: linear-gradient(135deg, #38bdf8, #6366f1); }
+.kw-pill.c2 { background: linear-gradient(135deg, #a78bfa, #ec4899); }
+.kw-pill.c3 { background: linear-gradient(135deg, #34d399, #0ea5e9); }
+.kw-pill.c4 { background: linear-gradient(135deg, #fb923c, #f59e0b); }
+.kw-pill.c5 { background: linear-gradient(135deg, #60a5fa, #818cf8); }
+.kw-pill.c6 { background: linear-gradient(135deg, #f472b6, #a78bfa); }
+.kw-pill.c7 { background: linear-gradient(135deg, #2dd4bf, #3b82f6); }
+.kw-pill.c8 { background: linear-gradient(135deg, #fbbf24, #f97316); }
+.bot-bottom-nav {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 12px;
+}
+.bot-nav-card {
+  background: linear-gradient(135deg, rgba(13,33,55,0.92), rgba(10,22,40,0.97));
+  border: 1px solid rgba(56,189,248,0.12);
+  border-radius: 14px; padding: 14px 6px; text-align: center;
+  cursor: pointer; transition: all 0.15s; text-decoration: none; display: block;
+}
+.bot-nav-card:hover {
+  border-color: rgba(56,189,248,0.45);
+  background: linear-gradient(135deg, rgba(18,42,70,0.97), rgba(13,33,55,0.99));
+  transform: translateY(-2px);
+  box-shadow: 0 4px 18px rgba(56,189,248,0.15);
+}
+.bot-nav-icon {
+  width: 42px; height: 42px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px; margin: 0 auto 7px;
+  border: 2px solid rgba(255,255,255,0.1);
+}
+.bot-nav-icon.wallet   { background: linear-gradient(135deg, #3b82f6, #1d4ed8); }
+.bot-nav-icon.ad       { background: linear-gradient(135deg, #8b5cf6, #6d28d9); }
+.bot-nav-icon.stats    { background: linear-gradient(135deg, #10b981, #059669); }
+.bot-nav-icon.recharge { background: linear-gradient(135deg, #f59e0b, #d97706); }
+.bot-nav-label { font-size: 12px; font-weight: 700; color: #fff; display: block; }
+.bot-nav-sub   { font-size: 9px; color: #64748b; display: block; margin-top: 2px; line-height: 1.3; }
+@media (max-width: 480px) {
+  .ad-row { padding: 5px 8px; font-size: 11px; gap: 4px; }
+  .ad-title { font-size: 11px; flex: 0 1 40%; }
+  .ad-desc { font-size: 10px; flex: 1 1 30%; }
+  .ad-action { font-size: 10px; padding: 1px 7px; }
+  .hot-kw-label { min-width: 64px; font-size: 10px; }
+  .hot-kw-tag { font-size: 10px; }
+  .chat-bubble-bot, .chat-bubble-user { max-width: 94%!important; font-size: 12px; }
+  .bot-welcome-banner { padding: 12px 14px; }
+  .bot-welcome-title { font-size: 14px; }
+  .bot-welcome-desc { font-size: 10px; }
+  .bot-robot-img { width: 60px; height: 60px; font-size: 30px; }
+  .bot-bottom-nav { gap: 6px; }
+  .bot-nav-card { padding: 10px 4px; }
+  .bot-nav-icon { width: 32px; height: 32px; font-size: 14px; }
+  .bot-nav-label { font-size: 10px; }
+  .bot-nav-sub { font-size: 8px; }
+  .promo-icon { width: 40px; height: 40px; font-size: 18px; }
+  .promo-title { font-size: 11px; }
+  .promo-desc { font-size: 10px; }
+  .promo-enter { padding: 6px 10px; font-size: 11px; }
+  .kw-section { padding: 10px; }
+  .kw-cat-label { min-width: 60px; font-size: 11px; }
+  .kw-pill { font-size: 10px; padding: 3px 8px; }
+}
+
 </style>
 </head>
 <body class="min-h-screen">
@@ -785,6 +975,11 @@ async function runCmd(cmd) {{
     showAdForm();
     return;
   }}
+  // 拦截广告模板命令，弹出模板选择（含创建表单）
+  if (cmd === '/adtemplates' || cmd === '广告模板' || cmd === '查看广告模板') {{
+    showAdForm();
+    return;
+  }}
   // 显示用户输入
   addMessage(escapeHtml(cmd), 'user');
   inputEl.value = '';
@@ -824,11 +1019,15 @@ function closeAdForm() {{
   if (modal) modal.style.display = 'none';
 }}
 
+// 全局存储模板数据，供 applyTemplate 使用
+var _adTemplateList = [];
+
 async function loadAdTemplates() {{
   try {{
     const res = await fetch('/api/bot/ad_templates');
     const d = await res.json();
     if (!d.templates || !d.templates.length) return;
+    _adTemplateList = d.templates;
     const container = document.getElementById('adTemplates');
     if (!container) return;
     container.innerHTML = d.templates.map((t,i) => `
@@ -842,21 +1041,63 @@ async function loadAdTemplates() {{
 }}
 
 function applyTemplate(id) {{
-  const templates = [
-    {{name:'🎯 精准获客', title:'🔥 精准获客 · 低成本高转化', desc:'专业团队运营，日曝光10万+，精准触达目标用户，CPC低至$0.02', url:'https://t.me/your_channel'}},
-    {{name:'💰 高收益投资', title:'💰 顶级投资项目 · 月化15%+', desc:'专业量化团队策略，稳赚不赔，每日分红，本金随时可取，加入即送体验金', url:'https://t.me/your_channel'}},
-    {{name:'🚀 新项目推广', title:'🚀 新项目首发 · 限时福利', desc:'全网首发独家资源，注册即送空投，邀请好友永久分润，日进斗金', url:'https://t.me/your_channel'}},
-    {{name:'📚 知识付费', title:'📚 实战教程 · 从零到精通', desc:'行业大咖亲授，10万+学员好评如潮，永久学习权限，社群答疑解惑', url:'https://t.me/your_channel'}},
-  ];
-  const t = templates[id] || templates[0];
-  document.getElementById('adTitle').value = t.title;
-  document.getElementById('adDesc').value = t.desc;
-  document.getElementById('adUrl').value = t.url;
+  const t = _adTemplateList[id] || _adTemplateList[0];
+  if (!t) return;
+  _currentTemplate = t;
   document.querySelectorAll('.template-card').forEach((el,i) => {{
     el.style.borderColor = i === id ? '#38bdf8' : '#475569';
     el.style.background = i === id ? '#334155' : '';
   }});
+  showTemplateFillModal(t);
+}}
+
+let _currentTemplate = null;
+
+function showTemplateFillModal(t) {{
+  const modal = document.getElementById('templateFillModal');
+  if (!modal) return;
+  const text = (t.title_template || '') + '\n' + (t.desc_template || '');
+  const placeholders = [...new Set(text.match(/\{([^}]+)\}/g) || [])].map(s => s.replace(/[{}]/g,''));
+  if (!placeholders.length) {{
+    const lines = (t.example_text||'').split('\n');
+    document.getElementById('adTitle').value = lines[0]||'';
+    document.getElementById('adDesc').value = lines.slice(1).join('\n')||'';
+    previewAd(); closeAdForm(); return;
+  }}
+  document.getElementById('tmplFillName').textContent = t.name + (t.category ? ' · ' + t.category : '');
+  const fieldsHtml = placeholders.map(p => `
+    <div style="margin-bottom:10px;">
+      <label style="font-size:11px;color:#94a3b8;display:block;margin-bottom:4px;">${{p}}</label>
+      <input id="tmplField_${{p}}" placeholder="请输入${{p}}" oninput="previewTemplateFill()"
+        style="width:100%;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:6px;padding:7px 10px;font-size:12px;box-sizing:border-box;">
+    </div>
+  `).join('');
+  document.getElementById('tmplFillFields').innerHTML = fieldsHtml;
+  modal.style.display = 'flex';
+}}
+
+function previewTemplateFill() {{
+  if (!_currentTemplate) return;
+  const text = (_currentTemplate.title_template||'') + '\n' + (_currentTemplate.desc_template||'');
+  const placeholders = [...new Set(text.match(/\{([^}]+)\}/g) || [])].map(s => s.replace(/[{}]/g,''));
+  let filled = text;
+  placeholders.forEach(p => {{
+    const val = document.getElementById('tmplField_'+p)?.value || '';
+    filled = filled.split('{{'+p+'}}').join(val || '{{'+p+'}}');
+  }});
+  const lines = filled.split('\n');
+  document.getElementById('adTitle').value = lines[0]||'';
+  document.getElementById('adDesc').value = lines.slice(1).join('\n')||'';
   previewAd();
+}}
+
+function applyTemplateFill() {{
+  previewTemplateFill();
+  document.getElementById('templateFillModal').style.display = 'none';
+}}
+
+function cancelTemplateFill() {{
+  document.getElementById('templateFillModal').style.display = 'none';
 }}
 
 function previewAd() {{
@@ -1105,7 +1346,11 @@ function renderBotResponse(data) {{
   if (data.actions && data.actions.length) {{
     html += '<div class="mt-3 pt-2 border-t border-gray-700">';
     for (const a of data.actions) {{
-      html += cmdButtonMarkup(a.text, a.cmd);
+      if (a.url && a.url !== '#') {{
+        html += `<a href="${{a.url}}" target="_blank" class="cmd-btn inline-block text-xs bg-emerald-600/80 hover:bg-emerald-500 text-white px-2 py-1 rounded mr-2 mb-1" style="text-decoration:none;">${{a.text}}</a>`;
+      }} else if (a.cmd) {{
+        html += cmdButtonMarkup(a.text, a.cmd);
+      }}
     }}
     html += '</div>';
   }}
@@ -1323,6 +1568,26 @@ function highlight(text, kw) {{
         <button onclick="closeClientAdEditModal()" style="flex:1;padding:10px;border-radius:8px;background:#334155;color:#94a3b8;border:none;font-size:13px;cursor:pointer;">取消</button>
         <button onclick="submitClientAdEdit()" style="flex:2;padding:10px;border-radius:8px;background:linear-gradient(135deg,#0ea5e9,#6366f1);color:#fff;border:none;font-size:13px;font-weight:bold;cursor:pointer;">💾 保存修改</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- ========== 模板填写弹窗（表格形式） ========== -->
+<div id="templateFillModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.75);z-index:1100;justify-content:center;align-items:center;padding:10px;">
+  <div style="background:#17212b;border-radius:14px;max-width:480px;width:100%;border:1px solid #334155;box-shadow:0 20px 60px rgba(0,0,0,0.5);overflow:hidden;">
+    <div style="padding:14px 18px;border-bottom:1px solid #334155;display:flex;justify-content:space-between;align-items:center;">
+      <div id="tmplFillTitle" style="font-size:14px;font-weight:bold;color:#fff;"></div>
+      <button onclick="cancelTemplateFill()" style="background:transparent;border:none;color:#94a3b8;font-size:18px;cursor:pointer;">✕</button>
+    </div>
+    <div style="padding:14px 18px;">
+      <div style="font-size:11px;color:#64748b;margin-bottom:10px;">📋 按表格提示填写占位符，实时预览效果</div>
+      <table style="width:100%;border-collapse:collapse;">
+        <tbody id="tmplFillTableBody"></tbody>
+      </table>
+    </div>
+    <div style="padding:0 18px 14px;display:flex;gap:10px;">
+      <button onclick="cancelTemplateFill()" style="flex:1;padding:9px;border-radius:8px;background:#334155;color:#94a3b8;border:none;font-size:13px;cursor:pointer;">取消</button>
+      <button onclick="applyTemplateFill()" style="flex:2;padding:9px;border-radius:8px;background:linear-gradient(135deg,#0ea5e9,#6366f1);color:#fff;border:none;font-size:13px;font-weight:bold;cursor:pointer;">✅ 应用并填入</button>
     </div>
   </div>
 </div>
@@ -6093,7 +6358,7 @@ async def _render_bot_module(mtype, u, balance, featured_ads, hot_keywords_by_ca
         if hot_keywords_by_cat:
             lines = []
             for cat_name, cat_data in hot_keywords_by_cat.items():
-                icon = cat_data.get("icon", "🔍")
+                cat_icon = kw_icon_map.get(cat_name, cat_data.get("icon", "🔍"))
                 keywords = cat_data.get("keywords", [])
                 if keywords:
                     kw_texts = [html.escape(kw.get("keyword", "")) for kw in keywords[:kw_limit]]
@@ -6160,158 +6425,153 @@ async def _render_bot_module(mtype, u, balance, featured_ads, hot_keywords_by_ca
 
 
 async def _build_start_html(u, balance, featured_ads, hot_keywords_by_cat):
-    """构建 /start 命令的 HTML 响应内容（支持演示布局）"""
-    actions = []
+    """构建 /start 命令的 HTML 响应内容（设计稿布局）"""
+    username = html.escape(u.get('username', '游客'))
+    html_parts = []
 
-    # 尝试加载演示设计器保存的布局
-    demo_layout = None
-    try:
-        from app.admin.system_settings_manager import load_all_settings_from_db
-        async with get_db() as db:
-            settings = await load_all_settings_from_db(db)
-        layout_str = settings.get("demo_layout")
-        if layout_str:
-            demo_layout = _json.loads(layout_str)
-    except Exception:
-        demo_layout = None
+    # ============ 欢迎 Banner ============
+    html_parts.append(f"""
+    <div class="bot-welcome-banner">
+      <div class="bot-welcome-inner">
+        <div class="bot-welcome-text">
+          <div class="bot-welcome-title">👋 欢迎来到 TG搜索机器人！</div>
+          <div class="bot-welcome-desc">
+            在这里，您可以快速搜索全球频道、群组、获取最新资讯、热门资源和优质内容。<br>
+            <b>AI智能搜索</b>：基于AI智能算法，精准推荐优质频道、群组和热门内容，让您发现更多有价值的信息。
+          </div>
+          <div class="bot-welcome-info">
+            <span class="bot-welcome-badge">👤 @{username}</span>
+            <span class="bot-welcome-badge">💰 余额 ${balance:.2f}U</span>
+            <span class="bot-welcome-badge">📊 免费搜索 5次/天</span>
+          </div>
+        </div>
+        <div class="bot-robot-icon-wrap">
+          <div class="bot-robot-img">🤖</div>
+        </div>
+      </div>
+    </div>""")
 
-    # 如果有保存的演示布局，按布局渲染模块
-    if demo_layout and isinstance(demo_layout, dict) and demo_layout.get("modules"):
-        layout_modules = demo_layout.get("modules", [])
-        # 按视觉位置排序：top 升序（从上到下），同 top 按 left 升序（从左到右）
-        # 兼容旧版数据：top/left 为 None 时按原索引排序，避免所有模块堆在一起
-        indexed_modules = [(i, m) for i, m in enumerate(layout_modules) if isinstance(m, dict) and m.get("visible", True)]
-        sorted_modules = sorted(
-            indexed_modules,
-            key=lambda item: (int(item[1].get("top") or (item[0] * 80)), int(item[1].get("left") or 15))
-        )
-        parts = []
-        # 欢迎语 + 身份信息（始终显示）
-        parts.append(f"""👋 <b>欢迎使用 TG搜索Pro Bot</b><br>
-                <div class="text-xs text-gray-400 mb-2">
-                    👤 身份：@{u.get('username','游客')} · 💰 余额：<b class="text-yellow-300">${balance:.2f} U</b> ·
-                    📊 免费搜索：<b>5</b> 次/天
-                </div>""")
-        for _orig_idx, m in sorted_modules:
-            mtype = m.get("type", "")
-            # top/left 为 None 时用索引计算默认位置（每模块间隔80px，避免所有模块堆在一起）
-            m_top = int(m.get("top") or (_orig_idx * 80))
-            m_left = int(m.get("left") or 15)
-            # 兼容旧版模块类型
-            legacy_map = {"title": "custom_html", "search": "search_box", "hot": "hot_keywords", "ad": "ads", "channel": "channels"}
-            mtype = legacy_map.get(mtype, mtype)
-            html_part, m_actions = await _render_bot_module(
-                mtype, u, balance, featured_ads, hot_keywords_by_cat,
-                channel_promo_ads=featured_ads, top=m_top, left=m_left
-            )
-            if html_part:
-                parts.append(html_part)
-            if m_actions:
-                actions.extend(m_actions)
-        reply_html = "\n".join(parts)
-        # 底部快捷菜单文本
-        bottom_menu = (
-            "\n━━━━━━━━━━━━━━\n"
-            "💰 /wallet 钱包　📊 /stats 统计　📺 /channels 频道\n"
-            "📣 /advertise 广告合作　💵 /recharge 充值"
-        )
-        reply_html += bottom_menu
-        # 始终包含基础快捷操作按钮（合并去重），放在最底部行
-        existing_cmds = {a.get("cmd") for a in actions if a.get("cmd")}
-        default_shortcuts = [
-            {"text": "📊 /stats 数据统计", "cmd": "/stats", "_top": 9999, "_left": 0},
-            {"text": "💰 /wallet 钱包", "cmd": "/wallet", "_top": 9999, "_left": 1},
-            {"text": "📺 /channels 频道管理", "cmd": "/channels", "_top": 9999, "_left": 2},
-            {"text": "📣 /ads 广告管理", "cmd": "/ads", "_top": 9999, "_left": 3},
-            {"text": "📣 /advertise 广告合作", "cmd": "/advertise", "_top": 9999, "_left": 4},
-        ]
-        for ds in default_shortcuts:
-            if ds["cmd"] not in existing_cmds:
-                actions.append(ds)
-        # 按视觉位置分组键盘按钮行：top 差值 <= 35px 视为同一行
-        keyboard_rows = _group_actions_into_rows(actions)
-        return reply_html, actions, keyboard_rows
-
-    # 默认布局（无保存的演示布局时使用）
-    ad_limit = Config.FEATURED_AD_LIMIT
-    featured_ads_html = ""
+    # ============ 精选推荐（频道/群组） ============
+    icon_classes = ['blue', 'purple', 'green', 'yellow', 'teal', 'rose']
+    icon_emojis = {'blue': '✈️', 'purple': '📢', 'green': '🤖', 'yellow': '🎮', 'teal': '🎓', 'rose': '💎'}
+    html_parts.append('<div class="module-section-title">🔥 精选推荐（推广频道/群组）</div>')
+    html_parts.append('<div class="module-section-sub">以下是管理员精心挑选的优质频道和群组，点击进入查看详情</div>')
     if featured_ads:
-        featured_ads_html = '<div class="mt-3"><div class="text-xs text-sky-300 mb-2 font-semibold">📣 今日热门推荐（点击标题直达）</div>'
-        for idx, ad in enumerate(featured_ads, 1):
+        for idx, ad in enumerate(featured_ads[:6]):
             title = html.escape(ad.get('title', ''))
             desc = html.escape(ad.get('description', ''))
             url = html.escape(ad.get('target_url', '#'))
-            username = ad.get('username', '') or ad.get('target_channel', '')
-            if username and not username.startswith('@'):
-                username = '@' + username
-            if username and ('http' in username or len(username) > 20):
-                username = ''
             category = html.escape(ad.get('category', ''))
-            members = ad.get('member_count', 0)
-            featured_badge = ' ⭐' if ad.get('is_featured') else ''
-            # 描述截断为单行（最多40字符）
-            desc_short = desc[:40] + '…' if len(desc) > 40 else desc
-            ad_row = f'{title}{featured_badge}  ·  {desc_short}' if desc else title
+            tags = [t.strip() for t in category.split('|') if t.strip()] if category else []
+            tag_html = ''.join(f'<span class="promo-tag">{html.escape(t[:8])}</span>' for t in tags[:3])
+            ic = icon_classes[idx % len(icon_classes)]
+            ie = icon_emojis[ic]
             if url and url != '#':
-                actions.append({"text": f"👉 加入", "url": url})
-            featured_ads_html += f'<div class="ad-row">{ad_row}</div>'
-        featured_ads_html += '</div>'
+                url_attr = f'href="{url}" target="_blank"'
+            else:
+                url_attr = 'href="#" onclick="return false;"'
+            desc_short = desc[:40] + '…' if len(desc) > 40 else desc
+            html_parts.append(f'''
+            <div class="promo-card">
+              <div class="promo-icon {ic}">{ie}</div>
+              <div class="promo-info">
+                <div class="promo-title-row">
+                  <span class="promo-title">{title}</span>
+                  <span class="promo-verified">✅</span>
+                </div>
+                <div class="promo-tags">{tag_html}</div>
+                <div class="promo-desc">{desc_short}</div>
+              </div>
+              <a class="promo-enter" {url_attr}>✈️ 进入</a>
+            </div>''')
+    else:
+        html_parts.append('<div class="module-section-sub" style="color:#64748b;">暂无推荐频道，敬请期待</div>')
 
-    kw_limit = Config.HOT_KEYWORD_PER_CATEGORY_LIMIT
-    hot_kw_html = ''
+    # ============ 热门搜索关键词 ============
+    kw_colors = ['c0', 'c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7', 'c8']
+    kw_icon_map = {
+        '热门推荐': '🔥', '影视娱乐': '⭐', '游戏专区': '🎮',
+        '学习教育': '📖', '实用工具': '🔧', '加密货币': '₿',
+        '社交聊天': '💬', '商业财经': '💼', '科技数码': '💻',
+    }
     if hot_keywords_by_cat:
-        hot_kw_html = '<div class="hot-kw-section mt-2"><div class="text-xs text-sky-300 mb-1 font-semibold">🚀 热门搜索</div>'
+        html_parts.append('<div class="kw-section">')
+        html_parts.append('<div class="kw-section-title">🔍 🔥 热门搜索关键词</div>')
+        html_parts.append('<div class="module-section-sub">点击关键词，快速搜索您感兴趣的内容</div>')
         for cat_name, cat_data in hot_keywords_by_cat.items():
-            icon = cat_data.get("icon", "🔍")
+            cat_icon = kw_icon_map.get(cat_name, "🔍")
             keywords = cat_data.get("keywords", [])
             if keywords:
-                tags_html = ''
-                for i, kw in enumerate(keywords[:kw_limit]):
+                pills = []
+                for i, kw in enumerate(keywords[:10]):
                     kw_text = html.escape(kw.get("keyword", ""))
-                    escaped_kw = html.escape(kw_text, quote=True)
-                    sep = ' <span class="hot-kw-sep">|</span> ' if i > 0 else ''
-                    tags_html += f'{sep}<a class="hot-kw-tag" href="#" onclick="runCmd(\'{escaped_kw}\')">{kw_text}</a>'
-                hot_kw_html += f'<div class="hot-kw-row"><span class="hot-kw-label">{icon} {html.escape(cat_name)}</span>{tags_html}</div>'
-        hot_kw_html += '</div>'
+                    color_cls = kw_colors[i % len(kw_colors)]
+                    escaped_kw_js = html.escape(kw_text, quote=True)
+                    pills.append(f'<button class="kw-pill {color_cls}" onclick="runCmd(\'{escaped_kw_js}\')">{kw_text}</button>')
+                label = html.escape(cat_name)
+                html_parts.append(
+                    f'<div class="kw-cat-row">'
+                    f'<span class="kw-cat-label">{cat_icon} {label}</span>'
+                    f'<div class="kw-pills">{"".join(pills)}</div>'
+                    f'</div>'
+                )
+        html_parts.append('</div>')
     else:
-        default_keywords = ["比特币", "以太坊", "AI", "空投", "Python", "FastAPI"]
-        tags_html = ''
-        for i, kw in enumerate(default_keywords):
+        default_kws = ["比特币", "以太坊", "AI", "空投", "Python", "FastAPI"]
+        pills = []
+        for i, kw in enumerate(default_kws):
+            color_cls = kw_colors[i % len(kw_colors)]
             escaped_kw = html.escape(kw, quote=True)
-            sep = ' <span class="hot-kw-sep">|</span> ' if i > 0 else ''
-            tags_html += f'{sep}<a class="hot-kw-tag" href="#" onclick="runCmd(\'{escaped_kw}\')">{html.escape(kw)}</a>'
-        hot_kw_html = f'<div class="hot-kw-section mt-2"><div class="text-xs text-sky-300 mb-1 font-semibold">🚀 热门搜索</div><div class="hot-kw-row"><span class="hot-kw-label">🚀 默认热门</span>{tags_html}</div></div>'
+            pills.append(f'<button class="kw-pill {color_cls}" onclick="runCmd(\'{escaped_kw}\')">{kw}</button>')
+        html_parts.append('<div class="kw-section">')
+        html_parts.append('<div class="kw-section-title">🔍 🔥 热门搜索关键词</div>')
+        html_parts.append('<div class="module-section-sub">点击关键词，快速搜索您感兴趣的内容</div>')
+        html_parts.append(
+            f'<div class="kw-cat-row">'
+            f'<span class="kw-cat-label">🔥 热门推荐</span>'
+            f'<div class="kw-pills">{"".join(pills)}</div>'
+            f'</div>'
+        )
+        html_parts.append('</div>')
 
-    reply_html = f"""
-                👋 <b>欢迎使用 TG搜索Pro Bot</b><br>
-                <div class="bg-sky-900/40 border border-sky-600/30 rounded-lg p-2 mt-2 mb-2 text-xs">
-                    <b class="text-sky-300">🤖 我能帮你做什么：</b><br>
-                    🔍 <b>精准搜索</b>：输入关键词，秒级返回相关频道和消息<br>
-                    📢 <b>精准广告</b>：你的广告只展示给真正感兴趣的用户<br>
-                    💰 <b>低成本获客</b>：按点击付费(CPC)，预算可控，ROI可追踪<br>
-                    📊 <b>数据洞察</b>：实时广告数据、搜索热度、转化统计
-                </div>
-                <div class="text-xs text-gray-400 mb-2">
-                    👤 身份：@{u.get('username','游客')} · 💰 余额：<b class="text-yellow-300">${balance:.2f} U</b> ·
-                    📊 免费搜索：<b>5</b> 次/天
-                </div>
-                {featured_ads_html}
-                {hot_kw_html}
-                <div class="mt-3 text-xs text-gray-400">👇 选择操作：</div>
-                <div class="mt-3 text-xs border-t border-gray-700 pt-2">
-                    💰 /wallet 钱包　📊 /stats 统计　📺 /channels 频道<br>
-                    📣 /advertise 广告合作　💵 /recharge 充值
-                </div>"""
+    # ============ 底部导航 ============
+    html_parts.append(f"""
+    <div class="bot-bottom-nav">
+      <a class="bot-nav-card" onclick="runCmd('/wallet')">
+        <div class="bot-nav-icon wallet">💳</div>
+        <span class="bot-nav-label">我的钱包</span>
+        <span class="bot-nav-sub">查看余额/账户信息</span>
+      </a>
+      <a class="bot-nav-card" onclick="runCmd('/advertise')">
+        <div class="bot-nav-icon ad">🤝</div>
+        <span class="bot-nav-label">广告合作</span>
+        <span class="bot-nav-sub">推广合作/流量变现</span>
+      </a>
+      <a class="bot-nav-card" onclick="runCmd('/stats')">
+        <div class="bot-nav-icon stats">📊</div>
+        <span class="bot-nav-label">统计</span>
+        <span class="bot-nav-sub">使用数据/收益统计</span>
+      </a>
+      <a class="bot-nav-card" onclick="runCmd('/recharge')">
+        <div class="bot-nav-icon recharge">👑</div>
+        <span class="bot-nav-label">充值</span>
+        <span class="bot-nav-sub">快速充值/享受更多</span>
+      </a>
+    </div>""")
 
+    reply_html = "\n".join(html_parts)
+
+    # 底部快捷操作按钮（兼容旧键盘布局）
     actions = [
-        {"text": "📊 /stats 数据统计", "cmd": "/stats", "_top": 0, "_left": 0},
-        {"text": "💰 /wallet 钱包", "cmd": "/wallet", "_top": 0, "_left": 1},
-        {"text": "📺 /channels 频道管理", "cmd": "/channels", "_top": 0, "_left": 2},
-        {"text": "📣 /ads 广告管理", "cmd": "/ads", "_top": 0, "_left": 3},
-        {"text": "📣 /advertise 广告合作", "cmd": "/advertise", "_top": 0, "_left": 4},
-    ] + actions
+        {"text": "📊 /stats 数据统计", "cmd": "/stats", "_top": 9999, "_left": 0},
+        {"text": "💰 /wallet 钱包", "cmd": "/wallet", "_top": 9999, "_left": 1},
+        {"text": "📺 /channels 频道管理", "cmd": "/channels", "_top": 9999, "_left": 2},
+        {"text": "📣 /advertise 广告合作", "cmd": "/advertise", "_top": 9999, "_left": 3},
+    ]
+
     keyboard_rows = _group_actions_into_rows(actions)
     return reply_html, actions, keyboard_rows
+
 
 
 @app.post("/api/bot/command")
